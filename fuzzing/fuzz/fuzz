@@ -150,7 +150,7 @@ if [ -e $1 ]; then
     FUZZER="$(basename $FUZZER_BIN)"
 else
     FUZZER="${1%_fuzzer}"
-    FUZZER_BIN="${FUZZER_BASE}/${OPT_ENGINE}/${FUZZER}_fuzzer"
+    FUZZER_BIN="${FUZZER_BASE}/${OPT_ENGINE}/${FUZZER}_fuzzer/${FUZZER}_fuzzer"
 
     if [ ! -e "$FUZZER_BIN" ]; then
         die "Invalid fuzzer name ${FUZZER}: ($FUZZER_BIN does not exist)"
