@@ -15,7 +15,7 @@
 # Abort on any error
 
 # Global configuration
-FUZZER_BASE="/data/nativetest64/fuzzers"
+FUZZER_BASES=( "/data/nativetest64/fuzzers" "/data/nativetest/fuzzers" )
 WORK_BASE="/data/local/tmp/fuzz"
 LAST_FUZZ="$WORK_BASE/last_session"
 
@@ -150,11 +150,11 @@ if [ -e $1 ]; then
     FUZZER="$(basename $FUZZER_BIN)"
 else
     FUZZER="${1%_fuzzer}"
-    FUZZER_BIN="${FUZZER_BASE}/${OPT_ENGINE}/${FUZZER}_fuzzer"
 
-    if [ ! -e "$FUZZER_BIN" ]; then
-        die "Invalid fuzzer name ${FUZZER}: ($FUZZER_BIN does not exist)"
-    fi
+    for FUZZER_BASE in "${FUZZER_BASES[@]}"; do
+        FUZZER_BIN="${FUZZER_BASE}/${OPT_ENGINE}/${FUZZER}_fuzzer/${FUZZER}_fuzzer"
+        [ -e "$FUZZER_BIN" ] && break
+    done
 fi
 
 shift
