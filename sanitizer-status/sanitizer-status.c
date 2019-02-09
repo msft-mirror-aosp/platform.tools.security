@@ -143,7 +143,7 @@ int sanitizer_status(int argc, const char** argv) {
   if (test_everything || have_option("asan", argv, argc)) {
     int asan_failures = 0;
 
-#ifndef ANDROID_SANITIZE_ADDRESS
+#if !defined(ANDROID_SANITIZE_ADDRESS) && !defined(ANDROID_SANITIZE_HWADDRESS)
     asan_failures += 1;
     printf("ASAN: Compiler flags failed!\n");
 #endif
