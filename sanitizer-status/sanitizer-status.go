@@ -28,6 +28,9 @@ func loadHook(ctx android.LoadHookContext) {
 	if android.InList("address", sanitizers) {
 		p.Cflags = append(p.Cflags, "-DANDROID_SANITIZE_ADDRESS=1")
 	}
+	if android.InList("hwaddress", sanitizers) {
+		p.Cflags = append(p.Cflags, "-DANDROID_SANITIZE_HWADDRESS=1")
+	}
 	if android.InList("coverage", sanitizers) {
 		p.Cflags = append(p.Cflags, "-DANDROID_SANITIZE_COVERAGE=1")
 	}
