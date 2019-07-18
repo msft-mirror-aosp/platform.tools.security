@@ -1,0 +1,7 @@
+cc_fuzz {
+    name: "example_fuzzer",
+    srcs: [
+        "example_fuzzer.cpp",
+    ],
+    host_supported: true,
+}
