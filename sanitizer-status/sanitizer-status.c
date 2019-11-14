@@ -93,6 +93,23 @@ int test_kasan() {
   return 0;
 }
 
+// Number of iterations required to reliably guarantee a GWP-ASan crash.
+// GWP-ASan's sample rate is not truly nondeterministic, it initialises a
+// thread-local counter at 2*SampleRate, and decrements on each malloc(). Once
+// the counter reaches zero, we provide a sampled allocation. GWP-ASan's current
+// default sample rate is 1/5000.
+#define GWP_ASAN_ITERATIONS_TO_ENSURE_CRASH (0x10000)
+
+// crashes with GWP-ASan
+void test_crash_gwp_asan() {
+  for (unsigned i = 0; i < GWP_ASAN_ITERATIONS_TO_ENSURE_CRASH; ++i ) {
+    volatile char *x = malloc(1);
+    free((void*) x);
+    *x = 0;
+  }
+  printf("GWP-ASan: Use after Free Failed\n");
+}
+
 // executes a test that is expected to crash
 // returns 0 if the test crashes
 int test(void (*function)()) {
@@ -214,6 +231,17 @@ int sanitizer_status(int argc, const char** argv) {
       printf("UBSAN: OK\n");
 
     failures += ubsan_failures;
+  }
+
+  if (test_everything || have_option("gwp_asan", argv, argc)) {
+    int gwp_asan_failures = 0;
+
+    gwp_asan_failures += test(test_crash_gwp_asan);
+
+    if (!gwp_asan_failures)
+      printf("GWP-ASan: OK\n");
+
+    failures += gwp_asan_failures;
   }
 
   return failures > 0 ? EXIT_FAILURE : EXIT_SUCCESS;
