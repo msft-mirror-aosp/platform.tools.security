@@ -14,4 +14,7 @@ cc_fuzz {
     // to gain extra coverage.
     corpus: ["corpus/*"],
     dictionary: "example_fuzzer.dict",
+    fuzz_config: {
+        disable: true,
+    },
 }
