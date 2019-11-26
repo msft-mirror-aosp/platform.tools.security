@@ -17,18 +17,18 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+
 #include <string>
 
 void BuggyCode(const char *data) {
-  char buffer[3]; // Forgot space for the null terminator!
-
   if (strcmp(data, "Hi!") == 0) {
-    strcpy(buffer, data); // Boom!
+    abort();  // Boom!
   }
 }
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
-  std::string null_terminated_string(reinterpret_cast<const char*>(data), size);
+  std::string null_terminated_string(reinterpret_cast<const char *>(data),
+                                     size);
 
   BuggyCode(null_terminated_string.c_str());
   return 0;
