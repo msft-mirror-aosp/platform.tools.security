@@ -15,6 +15,7 @@ cc_fuzz {
     corpus: ["corpus/*"],
     dictionary: "example_fuzzer.dict",
     fuzz_config: {
-        disable: true,
+        fuzz_on_haiku_device: false,
+        fuzz_on_haiku_host: false,
     },
 }
