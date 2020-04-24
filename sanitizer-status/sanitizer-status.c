@@ -65,7 +65,7 @@ int data_asan_exists() {
 void test_msan_crash_stack() {
   volatile int stack[10];
   stack[5] = 0;
-  if (stack[0]) {
+  if (stack[0]) { // NOLINT
     stack[0] = 1;
   }
   printf("MSAN: Stack Test Failed\n");
