@@ -20,7 +20,7 @@
 
 #include <string>
 
-void AbortOnGreeting(const char *data) {
+void BuggyCode(const char *data) {
   if (strcmp(data, "Hi!") == 0) {
     abort();  // Boom!
   }
@@ -30,6 +30,6 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   std::string null_terminated_string(reinterpret_cast<const char *>(data),
                                      size);
 
-  AbortOnGreeting(null_terminated_string.c_str());
+  BuggyCode(null_terminated_string.c_str());
   return 0;
 }
