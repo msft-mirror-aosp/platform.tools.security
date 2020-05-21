@@ -1,11 +1,20 @@
 cc_binary {
     name: "sanitizer-status",
 
-    srcs: ["sanitizer-status.c"],
-    c_std: "c11",
+    srcs: ["sanitizer-status.cpp"],
     cflags: [
         "-Wall",
         "-Werror",
         "-O0",
     ],
+
+    header_libs: [
+        "bionic_libc_platform_headers",
+    ],
+
+    product_variables: {
+        experimental_mte: {
+            cflags: ["-DANDROID_EXPERIMENTAL_MTE"],
+        },
+    },
 }
