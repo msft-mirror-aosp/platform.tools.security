@@ -157,7 +157,7 @@ int have_option(const char* option, const char** argv, const int argc) {
   return 0;
 }
 
-int sanitizer_status(int argc, const char** argv) {
+int main(int argc, const char** argv) {
   int test_everything = 0;
   int failures = 0;
 
@@ -167,7 +167,7 @@ int sanitizer_status(int argc, const char** argv) {
   if (test_everything || have_option("asan", argv, argc)) {
     int asan_failures = 0;
 
-#if !defined(ANDROID_SANITIZE_ADDRESS)
+#if !__has_feature(address_sanitizer)
     asan_failures += 1;
     printf("ASAN: Compiler flags failed!\n");
 #endif
@@ -185,7 +185,7 @@ int sanitizer_status(int argc, const char** argv) {
   if (test_everything || have_option("hwasan", argv, argc)) {
     int hwasan_failures = 0;
 
-#if !defined(ANDROID_SANITIZE_HWADDRESS)
+#if !__has_feature(hwaddress_sanitizer)
     hwasan_failures += 1;
     printf("HWASAN: Compiler flags failed!\n");
 #endif
@@ -198,20 +198,6 @@ int sanitizer_status(int argc, const char** argv) {
       printf("HWASAN: OK\n");
 
     failures += hwasan_failures;
-  }
-
-  if(test_everything || have_option("cov", argv, argc)) {
-    int cov_failures = 0;
-
-#ifndef ANDROID_SANITIZE_COVERAGE
-    printf("COV: Compiler flags failed!\n");
-    cov_failures += 1;
-#endif
-
-    if (!cov_failures)
-      printf("COV: OK\n");
-
-    failures += cov_failures;
   }
 
   if (test_everything || have_option("msan", argv, argc)) {
