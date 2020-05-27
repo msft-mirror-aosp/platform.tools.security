@@ -20,20 +20,33 @@
 #include <getopt.h>
 #include <limits.h>
 #include <paths.h>
+#include <pthread.h>
 #include <pwd.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/prctl.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 
-// crashes if built with -fsanitize=address
-void test_crash_malloc() {
-  volatile char* heap = malloc(32);
+#include <bionic/malloc.h>
+#include <bionic/mte.h>
+
+// crashes if built with -fsanitize={address,hwaddress}
+void test_crash_malloc_overflow() {
+  volatile char* heap = reinterpret_cast<volatile char *>(malloc(32));
   heap[32] = heap[32];
-  printf("ASAN: Heap Test Failed\n");
+  printf("Heap Overflow Test Failed\n");
+}
+
+// crashes if built with -fsanitize={address,hwaddresss}
+void test_crash_malloc_uaf() {
+  volatile char* heap = reinterpret_cast<volatile char *>(malloc(32));
+  free((void *)heap);
+  heap[0] = heap[0];
+  printf("Heap UAF Test Failed\n");
 }
 
 // crashes if built with -fsanitize=address
@@ -41,7 +54,13 @@ void test_crash_stack() {
   volatile char stack[32];
   volatile char* p_stack = stack;
   p_stack[32] = p_stack[32];
-  printf("ASAN: Stack Test Failed\n");
+  printf("(HW)ASAN: Stack Test Failed\n");
+}
+
+void test_crash_pthread_mutex_unlock() {
+  volatile char* heap = reinterpret_cast<volatile char *>(malloc(32));
+  pthread_mutex_unlock((pthread_mutex_t*)&heap[32]);
+  printf("HWASAN: Libc Test Failed\n");
 }
 
 int data_asan_exists() {
@@ -103,7 +122,7 @@ int test_kasan() {
 // crashes with GWP-ASan
 void test_crash_gwp_asan() {
   for (unsigned i = 0; i < GWP_ASAN_ITERATIONS_TO_ENSURE_CRASH; ++i ) {
-    volatile char *x = malloc(1);
+    volatile char* x = reinterpret_cast<volatile char *>(malloc(1));
     free((void*) x);
     *x = 0;
   }
@@ -150,7 +169,7 @@ int have_option(const char* option, const char** argv, const int argc) {
   return 0;
 }
 
-int sanitizer_status(int argc, const char** argv) {
+int main(int argc, const char** argv) {
   int test_everything = 0;
   int failures = 0;
 
@@ -160,12 +179,13 @@ int sanitizer_status(int argc, const char** argv) {
   if (test_everything || have_option("asan", argv, argc)) {
     int asan_failures = 0;
 
-#if !defined(ANDROID_SANITIZE_ADDRESS) && !defined(ANDROID_SANITIZE_HWADDRESS)
+#if !__has_feature(address_sanitizer)
     asan_failures += 1;
     printf("ASAN: Compiler flags failed!\n");
 #endif
 
-    asan_failures += test(test_crash_malloc);
+    asan_failures += test(test_crash_malloc_overflow);
+    asan_failures += test(test_crash_malloc_uaf);
     asan_failures += test(test_crash_stack);
     asan_failures += data_asan_exists();
 
@@ -175,18 +195,23 @@ int sanitizer_status(int argc, const char** argv) {
     failures += asan_failures;
   }
 
-  if(test_everything || have_option("cov", argv, argc)) {
-    int cov_failures = 0;
+  if (test_everything || have_option("hwasan", argv, argc)) {
+    int hwasan_failures = 0;
 
-#ifndef ANDROID_SANITIZE_COVERAGE
-    printf("COV: Compiler flags failed!\n");
-    cov_failures += 1;
+#if !__has_feature(hwaddress_sanitizer)
+    hwasan_failures += 1;
+    printf("HWASAN: Compiler flags failed!\n");
 #endif
 
-    if (!cov_failures)
-      printf("COV: OK\n");
+    hwasan_failures += test(test_crash_malloc_overflow);
+    hwasan_failures += test(test_crash_malloc_uaf);
+    hwasan_failures += test(test_crash_stack);
+    hwasan_failures += test(test_crash_pthread_mutex_unlock);
 
-    failures += cov_failures;
+    if (!hwasan_failures)
+      printf("HWASAN: OK\n");
+
+    failures += hwasan_failures;
   }
 
   if (test_everything || have_option("msan", argv, argc)) {
@@ -242,6 +267,51 @@ int sanitizer_status(int argc, const char** argv) {
       printf("GWP-ASan: OK\n");
 
     failures += gwp_asan_failures;
+  }
+
+  if (test_everything || have_option("mte", argv, argc)) {
+    int mte_failures = 0;
+
+    if (!(mte_supported() && !__has_feature(address_sanitizer) &&
+          !__has_feature(hwaddress_sanitizer))) {
+      mte_failures += 1;
+      printf("MTE: Not supported\n");
+    }
+
+    mte_failures += test(test_crash_malloc_overflow);
+    mte_failures += test(test_crash_malloc_uaf);
+
+    int tagged_addr_ctrl = prctl(PR_GET_TAGGED_ADDR_CTRL, 0, 0, 0, 0);
+    if (tagged_addr_ctrl < 0) {
+      mte_failures += 1;
+      printf("MTE: PR_GET_TAGGED_ADDR_CTRL failed\n");
+    }
+
+#if defined(ANDROID_EXPERIMENTAL_MTE)
+    tagged_addr_ctrl = (tagged_addr_ctrl & ~PR_MTE_TCF_MASK) | PR_MTE_TCF_SYNC;
+    if (prctl(PR_SET_TAGGED_ADDR_CTRL, tagged_addr_ctrl, 0, 0, 0) != 0) {
+      mte_failures += 1;
+      printf("MTE: PR_SET_TAGGED_ADDR_CTRL failed\n");
+    }
+#else
+    mte_failures += 1;
+    printf("MTE: ANDROID_EXPERIMENTAL_MTE disabled\n");
+#endif
+
+    HeapTaggingLevel heap_tagging_level = M_HEAP_TAGGING_LEVEL_SYNC;
+    if (!android_mallopt(M_SET_HEAP_TAGGING_LEVEL, &heap_tagging_level,
+                         sizeof(heap_tagging_level))) {
+      mte_failures += 1;
+      printf("MTE: android_mallopt failed\n");
+    }
+
+    mte_failures += test(test_crash_malloc_overflow);
+    mte_failures += test(test_crash_malloc_uaf);
+
+    if (!mte_failures)
+      printf("MTE: OK\n");
+
+    failures += mte_failures;
   }
 
   return failures > 0 ? EXIT_FAILURE : EXIT_SUCCESS;

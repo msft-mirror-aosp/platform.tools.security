@@ -1,37 +1,20 @@
-cc_defaults {
-    name: "sanitizer-status_defaults",
+cc_binary {
+    name: "sanitizer-status",
 
-    c_std: "c11",
+    srcs: ["sanitizer-status.cpp"],
     cflags: [
         "-Wall",
         "-Werror",
         "-O0",
     ],
-}
 
-sanitizer_status_library_shared {
-    name: "libsanitizer-status",
-    defaults: ["sanitizer-status_defaults"],
-
-    srcs: ["sanitizer-status.c"],
-}
-
-cc_binary {
-    name: "sanitizer-status",
-    defaults: ["sanitizer-status_defaults"],
-
-    srcs: ["main.c"],
-    shared_libs: ["libsanitizer-status"],
-}
-
-bootstrap_go_package {
-    name: "soong-sanitizer_status",
-    pkgPath: "android/soong/security/santizers_status",
-    deps: [
-        "blueprint",
-        "soong-android",
-        "soong-cc",
+    header_libs: [
+        "bionic_libc_platform_headers",
     ],
-    srcs: ["sanitizer-status.go"],
-    pluginFor: ["soong_build"],
+
+    product_variables: {
+        experimental_mte: {
+            cflags: ["-DANDROID_EXPERIMENTAL_MTE"],
+        },
+    },
 }
