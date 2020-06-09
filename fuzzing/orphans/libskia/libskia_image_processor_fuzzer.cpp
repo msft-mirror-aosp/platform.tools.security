@@ -30,13 +30,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
-extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
-  FuzzedDataProvider dataProvider(data, size);
-
+static int getAndroidPixels(const char *data, bool requestPremul) {
   // Generate stream contents
-  bool requestPremul = dataProvider.ConsumeBool();
-  std::string contents = dataProvider.ConsumeRandomLengthString(size);
-  std::unique_ptr<SkMemoryStream> stream = SkMemoryStream::MakeDirect(contents.c_str(), size);
+  std::string contents = std::string(data);
+  std::unique_ptr<SkMemoryStream> stream = SkMemoryStream::MakeDirect(contents.data(), contents.size());
   if (!stream) {
     return 0;
   }
@@ -71,6 +68,15 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 
   codec->getAndroidPixels(
       decodeInfo, decodingBitmap.getPixels(), decodingBitmap.rowBytes());
+  return 0;
+}
 
+extern "C" int LLVMFuzzerTestOneInput(const char *data, size_t size) {
+  if (size == 0) {
+    return 0;
+  }
+
+  getAndroidPixels(data, true);
+  getAndroidPixels(data, false);
   return 0;
 }
