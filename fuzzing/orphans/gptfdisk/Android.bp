@@ -1,0 +1,12 @@
+cc_fuzz {
+    name: "sgdisk_fuzz",
+    host_supported: true,
+    srcs: [
+        "sgdisk_fuzz.cc",
+    ],
+    static_libs: [
+        "libgptf",
+    ],
+    shared_libs: ["libext2_uuid"],
+    corpus: ["corpus/*"],
+}
