@@ -30,9 +30,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-static int getAndroidPixels(const char *data, bool requestPremul) {
+static int getAndroidPixels(std::string& contents, bool requestPremul) {
   // Generate stream contents
-  std::string contents = std::string(data);
   std::unique_ptr<SkMemoryStream> stream = SkMemoryStream::MakeDirect(contents.data(), contents.size());
   if (!stream) {
     return 0;
@@ -71,12 +70,14 @@ static int getAndroidPixels(const char *data, bool requestPremul) {
   return 0;
 }
 
-extern "C" int LLVMFuzzerTestOneInput(const char *data, size_t size) {
+extern "C" int LLVMFuzzerTestOneInput(char *data, size_t size) {
   if (size == 0) {
     return 0;
   }
 
-  getAndroidPixels(data, true);
-  getAndroidPixels(data, false);
+  std::string sdata1(data, size);
+  getAndroidPixels(sdata1, true);
+  std::string sdata2(data, size);
+  getAndroidPixels(sdata2, false);
   return 0;
 }
