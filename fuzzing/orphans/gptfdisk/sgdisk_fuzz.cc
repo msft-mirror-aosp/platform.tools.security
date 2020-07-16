@@ -34,7 +34,12 @@ static int fuzz_gpt(char* partition_file) {
     return 0;
 }
 
+#ifdef GPTFDISK_FUZZER_DEVICE
+#define TMPFILE_TEMPLATE "/data/local/tmp/gptfuzzXXXXXXXX\x00"
+#else
 #define TMPFILE_TEMPLATE "/dev/shm/gptfuzzXXXXXXXX\x00"
+#endif
+
 size_t TMPFILE_LEN = sizeof(TMPFILE_TEMPLATE);
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
