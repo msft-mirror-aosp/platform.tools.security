@@ -9,4 +9,9 @@ cc_fuzz {
     ],
     shared_libs: ["libext2_uuid"],
     corpus: ["corpus/*"],
+    target: {
+        android: {
+            cflags: ["-DGPTFDISK_FUZZER_DEVICE"],
+        },
+    },
 }
