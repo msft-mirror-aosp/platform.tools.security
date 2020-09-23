@@ -163,7 +163,7 @@ public class AttestationTest extends AsyncTask<Void, String, Void> {
                 (ImmutableSet) retrieveUnexpectedExtensionOids(attestationCert);
         if (!unexpectedExtensionOids.isEmpty()) {
             Log.e(FAIL, "attestation certificate contains unexpected OIDs");
-            for (String oid : (String[]) unexpectedExtensionOids.toArray()) {
+            for (String oid : unexpectedExtensionOids.toArray(new String[unexpectedExtensionOids.size()])) {
                 Log.e(FAIL, "Unexpected OID: " + oid);
             }
         }
