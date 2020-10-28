@@ -7,4 +7,5 @@ cc_fuzz {
         "libexif",
     ],
     host_supported: false,
+    corpus: ["corpus/*"],
 }
