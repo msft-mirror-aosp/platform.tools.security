@@ -287,13 +287,7 @@ int main(int argc, const char** argv) {
       printf("MTE: PR_GET_TAGGED_ADDR_CTRL failed\n");
     }
 
-#if defined(ANDROID_EXPERIMENTAL_MTE)
-    tagged_addr_ctrl = (tagged_addr_ctrl & ~PR_MTE_TCF_MASK) | PR_MTE_TCF_SYNC;
-    if (prctl(PR_SET_TAGGED_ADDR_CTRL, tagged_addr_ctrl, 0, 0, 0) != 0) {
-      mte_failures += 1;
-      printf("MTE: PR_SET_TAGGED_ADDR_CTRL failed\n");
-    }
-#else
+#if !defined(ANDROID_EXPERIMENTAL_MTE)
     mte_failures += 1;
     printf("MTE: ANDROID_EXPERIMENTAL_MTE disabled\n");
 #endif
