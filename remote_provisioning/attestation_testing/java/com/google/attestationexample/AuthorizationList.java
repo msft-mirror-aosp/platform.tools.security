@@ -265,7 +265,12 @@ public class AuthorizationList {
                     userAuthType = Asn1Utils.getIntegerFromAsn1(value);
                     break;
                 case KM_TAG_ROOT_OF_TRUST & KEYMASTER_TAG_TYPE_MASK:
-                    rootOfTrust = new RootOfTrust(value);
+                    try {
+                        rootOfTrust = new RootOfTrust(value);
+                    } catch (CertificateParsingException e) {
+                        Log.e("AttestationFail", "Root of trust parsing failure" + e);
+                        rootOfTrust = null;
+                    }
                     break;
                 case KM_TAG_ATTESTATION_APPLICATION_ID & KEYMASTER_TAG_TYPE_MASK:
                     attestationApplicationId = new AttestationApplicationId(Asn1Utils
