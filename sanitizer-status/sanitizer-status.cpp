@@ -287,11 +287,6 @@ int main(int argc, const char** argv) {
       printf("MTE: PR_GET_TAGGED_ADDR_CTRL failed\n");
     }
 
-#if !defined(ANDROID_EXPERIMENTAL_MTE)
-    mte_failures += 1;
-    printf("MTE: ANDROID_EXPERIMENTAL_MTE disabled\n");
-#endif
-
     HeapTaggingLevel heap_tagging_level = M_HEAP_TAGGING_LEVEL_SYNC;
     if (!android_mallopt(M_SET_HEAP_TAGGING_LEVEL, &heap_tagging_level,
                          sizeof(heap_tagging_level))) {
