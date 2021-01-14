@@ -46,6 +46,10 @@ public class RootOfTrust {
         }
 
         ASN1Sequence sequence = (ASN1Sequence) asn1Encodable;
+        if (sequence.size() != 4) {
+            throw new CertificateParsingException(
+                "Incorrect size, actual size is:" + sequence.size());
+        }
         verifiedBootKey =
                 Asn1Utils.getByteArrayFromAsn1(sequence.getObjectAt(VERIFIED_BOOT_KEY_INDEX));
         deviceLocked = Asn1Utils.getBooleanFromAsn1(sequence.getObjectAt(DEVICE_LOCKED_INDEX));
