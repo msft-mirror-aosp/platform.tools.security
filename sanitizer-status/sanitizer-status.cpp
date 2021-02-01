@@ -19,6 +19,7 @@
 #include <fcntl.h>
 #include <getopt.h>
 #include <limits.h>
+#include <malloc.h>
 #include <paths.h>
 #include <pthread.h>
 #include <pwd.h>
@@ -31,7 +32,6 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
-#include <bionic/malloc.h>
 #include <bionic/mte.h>
 
 // crashes if built with -fsanitize={address,hwaddress}
@@ -287,16 +287,10 @@ int main(int argc, const char** argv) {
       printf("MTE: PR_GET_TAGGED_ADDR_CTRL failed\n");
     }
 
-#if !defined(ANDROID_EXPERIMENTAL_MTE)
-    mte_failures += 1;
-    printf("MTE: ANDROID_EXPERIMENTAL_MTE disabled\n");
-#endif
-
     HeapTaggingLevel heap_tagging_level = M_HEAP_TAGGING_LEVEL_SYNC;
-    if (!android_mallopt(M_SET_HEAP_TAGGING_LEVEL, &heap_tagging_level,
-                         sizeof(heap_tagging_level))) {
+    if (mallopt(M_BIONIC_SET_HEAP_TAGGING_LEVEL, heap_tagging_level) == 0) {
       mte_failures += 1;
-      printf("MTE: android_mallopt failed\n");
+      printf("MTE: mallopt failed\n");
     }
 
     mte_failures += test(test_crash_malloc_overflow);
