@@ -24,6 +24,17 @@ cc_fuzz {
     shared_libs: [
         "libcppbor_external",
     ],
+    host_supported: true,
+}
+
+cc_fuzz {
+    name: "cppbor_parse_fuzzer",
+    srcs: [
+        "cppbor_parse_fuzzer.cpp",
+    ],
+    shared_libs: [
+        "libcppbor_external",
+    ],
     corpus: ["corpus/*.cbor"],
     host_supported: true,
 }
