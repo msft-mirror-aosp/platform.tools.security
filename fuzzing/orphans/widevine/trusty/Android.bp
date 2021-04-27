@@ -26,3 +26,13 @@ cc_fuzz {
         "-DTRUSTY_APP_FILENAME=\"widevine.syms.elf\"",
     ],
 }
+
+// Fuzzer for ODK_DispatchMessage() that's inside Trusty.
+cc_fuzz {
+    name: "trusty_widevine_dispatch_fuzzer",
+    defaults: ["trusty_fuzzer_defaults"],
+    srcs: ["dispatch_fuzzer.cpp"],
+    shared_libs: [
+        "libdmabufheap",
+    ],
+}
