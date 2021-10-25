@@ -24,3 +24,16 @@ rust_fuzz {
         fuzz_on_haiku_host: true,
     },
 }
+
+rust_fuzz {
+    name: "hashbrown_hashset_fuzzer",
+    srcs: ["hashbrown_hashset_fuzzer.rs"],
+    rustlibs: [
+        "libarbitrary",
+        "libhashbrown",
+    ],
+    fuzz_config: {
+        fuzz_on_haiku_device: true,
+        fuzz_on_haiku_host: true,
+    },
+}
