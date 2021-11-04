@@ -17,11 +17,11 @@ package {
 }
 
 rust_fuzz {
-    name: "hashbrown_hashmap_fuzzer",
-    srcs: ["hashbrown_hashmap_fuzzer.rs"],
+    name: "hashlink_linkedhashmap_fuzzer",
+    srcs: ["hashlink_linkedhashmap_fuzzer.rs"],
     rustlibs: [
         "libarbitrary",
-        "libhashbrown",
+        "libhashlink",
     ],
     fuzz_config: {
         fuzz_on_haiku_device: true,
@@ -30,11 +30,24 @@ rust_fuzz {
 }
 
 rust_fuzz {
-    name: "hashbrown_hashset_fuzzer",
-    srcs: ["hashbrown_hashset_fuzzer.rs"],
+    name: "hashlink_linkedhashset_fuzzer",
+    srcs: ["hashlink_linkedhashset_fuzzer.rs"],
     rustlibs: [
         "libarbitrary",
-        "libhashbrown",
+        "libhashlink",
+    ],
+    fuzz_config: {
+        fuzz_on_haiku_device: true,
+        fuzz_on_haiku_host: true,
+    },
+}
+
+rust_fuzz {
+    name: "hashlink_lrucache_fuzzer",
+    srcs: ["hashlink_lrucache_fuzzer.rs"],
+    rustlibs: [
+        "libarbitrary",
+        "libhashlink",
     ],
     fuzz_config: {
         fuzz_on_haiku_device: true,
