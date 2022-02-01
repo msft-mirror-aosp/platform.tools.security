@@ -23,7 +23,8 @@ java_fuzz_host {
         "jazzer",
     ],
     fuzz_config: {
-        fuzz_on_haiku_host: true,
+        fuzz_on_haiku_device: false,
+        fuzz_on_haiku_host: false,
     },
     corpus: ["testdata/*"],
     dictionary: "example_java_fuzzer.dict",
