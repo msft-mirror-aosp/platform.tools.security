@@ -28,8 +28,4 @@ cc_binary {
     header_libs: [
         "bionic_libc_platform_headers",
     ],
-
-    sanitize: {
-        memtag_heap: true,
-    },
 }
