@@ -18,9 +18,9 @@ pub mod entry {
     /// Read a series of bcc file certificates and verify that the public key of
     /// any given cert's payload in the series correctly signs the next cose
     /// sign1 cert.
-    pub fn check_sign1_cert_chain(certs: &[&str]) -> Result<()> {
+    pub fn check_sign1_cert_chain(certs: &[String]) -> Result<()> {
         ensure!(!certs.is_empty());
-        let mut payload = Payload::from_sign1(&read(certs[0])?)
+        let mut payload = Payload::from_sign1(&read(&certs[0])?)
             .context("Failed to read the first bccEntry payload")?;
         for item in certs.iter().skip(1) {
             payload
