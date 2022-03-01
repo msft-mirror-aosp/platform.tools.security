@@ -93,7 +93,7 @@ mod tests {
             alg: Some(coset::Algorithm::PrivateUse(1000)),
             ..Default::default()
         };
-        assert!(!bcc::entry::check_protected_header(&eddsa, &header).is_ok());
+        assert!(bcc::entry::check_protected_header(&eddsa, &header).is_err());
         let mut header = Header {
             alg: (&eddsa).clone(),
             ..Default::default()
@@ -115,7 +115,7 @@ mod tests {
         header.crit.push(RegisteredLabel::Assigned(
             iana::HeaderParameter::CounterSignature,
         ));
-        assert!(!bcc::entry::check_protected_header(&eddsa, &header).is_ok());
+        assert!(bcc::entry::check_protected_header(&eddsa, &header).is_err());
         Ok(())
     }
 }
