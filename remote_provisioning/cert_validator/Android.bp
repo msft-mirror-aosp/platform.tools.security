@@ -58,3 +58,18 @@ rust_test {
         "libssl_bindgen",
     ],
 }
+
+rust_binary {
+    name: "bcc_validator",
+    srcs: ["src/bcc_main.rs"],
+    host_supported: true,
+    rustlibs: [
+        "libcert_request_validator",
+        "libanyhow",
+        "libthiserror",
+        "libciborium",
+        "libcoset",
+        "libchrono",
+        "libssl_bindgen",
+    ],
+}
