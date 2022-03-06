@@ -57,10 +57,10 @@ mod tests {
 
     #[test]
     fn test_check_sign1_cert_chain() {
-        let arr: Vec<&str> = vec![
-            "testdata/open-dice/_CBOR_Ed25519_cert_full_cert_chain_0.cert",
-            "testdata/open-dice/_CBOR_Ed25519_cert_full_cert_chain_1.cert",
-            "testdata/open-dice/_CBOR_Ed25519_cert_full_cert_chain_2.cert",
+        let arr: Vec<String> = vec![
+            String::from("testdata/open-dice/_CBOR_Ed25519_cert_full_cert_chain_0.cert"),
+            String::from("testdata/open-dice/_CBOR_Ed25519_cert_full_cert_chain_1.cert"),
+            String::from("testdata/open-dice/_CBOR_Ed25519_cert_full_cert_chain_2.cert"),
         ];
         assert!(bcc::entry::check_sign1_cert_chain(&arr).is_ok());
     }
@@ -93,7 +93,7 @@ mod tests {
             alg: Some(coset::Algorithm::PrivateUse(1000)),
             ..Default::default()
         };
-        assert!(!bcc::entry::check_protected_header(&eddsa, &header).is_ok());
+        assert!(bcc::entry::check_protected_header(&eddsa, &header).is_err());
         let mut header = Header {
             alg: (&eddsa).clone(),
             ..Default::default()
@@ -115,7 +115,7 @@ mod tests {
         header.crit.push(RegisteredLabel::Assigned(
             iana::HeaderParameter::CounterSignature,
         ));
-        assert!(!bcc::entry::check_protected_header(&eddsa, &header).is_ok());
+        assert!(bcc::entry::check_protected_header(&eddsa, &header).is_err());
         Ok(())
     }
 }
