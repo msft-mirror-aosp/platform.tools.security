@@ -22,7 +22,6 @@ cc_fuzz {
         "libwatchdog_perf_service",
     ],
     shared_libs: [
-        "android.hardware.automotive.vehicle@2.0",
         "libbase",
     ],
 }

@@ -12,7 +12,4 @@ cc_fuzz {
     ],
     host_supported: false,
     corpus: ["corpus/*"],
-    fuzz_config: {
-       cc: ["kalder@google.com"],
-    },
 }
