@@ -12,17 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package {
-    default_applicable_licenses: ["Android-Apache-2.0"],
-}
+import com.code_intelligence.jazzer.api.FuzzedDataProvider;
 
-rust_fuzz {
-    name: "example_rust_fuzzer",
-    srcs: ["fuzzer.rs"],
-    fuzz_config: {
-        fuzz_on_haiku_device: false,
-        fuzz_on_haiku_host: false,
-    },
-    corpus: ["testdata/*"],
-    dictionary: "example_rust_fuzzer.dict",
+public class ExampleFuzzer {
+
+    public static void fuzzerTestOneInput(FuzzedDataProvider data) {
+        int magicNumber = 327;
+        if (data.consumeInt() == magicNumber) {
+          throw new UnsupportedOperationException("Fuzz error");
+        }
+    }
 }
