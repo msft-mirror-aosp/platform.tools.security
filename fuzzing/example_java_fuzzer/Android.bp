@@ -16,13 +16,16 @@ package {
     default_applicable_licenses: ["Android-Apache-2.0"],
 }
 
-rust_fuzz {
-    name: "example_rust_fuzzer",
-    srcs: ["fuzzer.rs"],
+java_fuzz_host {
+    name: "example_java_fuzzer",
+    srcs: ["ExampleFuzzer.java"],
+    static_libs: [
+        "jazzer",
+    ],
     fuzz_config: {
         fuzz_on_haiku_device: false,
         fuzz_on_haiku_host: false,
     },
     corpus: ["testdata/*"],
-    dictionary: "example_rust_fuzzer.dict",
+    dictionary: "example_java_fuzzer.dict",
 }
