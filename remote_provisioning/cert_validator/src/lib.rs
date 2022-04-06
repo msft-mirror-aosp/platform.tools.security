@@ -84,37 +84,18 @@ mod tests {
     #[test]
     fn test_check_bcc_entry_protected_header() -> Result<()> {
         let eddsa = Some(coset::Algorithm::Assigned(iana::Algorithm::EdDSA));
-        let header = Header {
-            alg: (&eddsa).clone(),
-            ..Default::default()
-        };
+        let header = Header { alg: (&eddsa).clone(), ..Default::default() };
         bcc::entry::check_protected_header(&eddsa, &header).context("Only alg allowed")?;
-        let header = Header {
-            alg: Some(coset::Algorithm::PrivateUse(1000)),
-            ..Default::default()
-        };
+        let header = Header { alg: Some(coset::Algorithm::PrivateUse(1000)), ..Default::default() };
         assert!(bcc::entry::check_protected_header(&eddsa, &header).is_err());
-        let mut header = Header {
-            alg: (&eddsa).clone(),
-            ..Default::default()
-        };
+        let mut header = Header { alg: (&eddsa).clone(), ..Default::default() };
         header.rest.push((Label::Int(1000), Value::from(2000u16)));
         bcc::entry::check_protected_header(&eddsa, &header).context("non-crit header allowed")?;
-        let mut header = Header {
-            alg: (&eddsa).clone(),
-            ..Default::default()
-        };
-        header
-            .crit
-            .push(RegisteredLabel::Assigned(iana::HeaderParameter::Alg));
+        let mut header = Header { alg: (&eddsa).clone(), ..Default::default() };
+        header.crit.push(RegisteredLabel::Assigned(iana::HeaderParameter::Alg));
         bcc::entry::check_protected_header(&eddsa, &header).context("OK to say alg is critical")?;
-        let mut header = Header {
-            alg: (&eddsa).clone(),
-            ..Default::default()
-        };
-        header.crit.push(RegisteredLabel::Assigned(
-            iana::HeaderParameter::CounterSignature,
-        ));
+        let mut header = Header { alg: (&eddsa).clone(), ..Default::default() };
+        header.crit.push(RegisteredLabel::Assigned(iana::HeaderParameter::CounterSignature));
         assert!(bcc::entry::check_protected_header(&eddsa, &header).is_err());
         Ok(())
     }
