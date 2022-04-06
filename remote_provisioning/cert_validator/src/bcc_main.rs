@@ -3,15 +3,9 @@
 //! certificates are valid and that any given cert in the series correctly
 //! signs the next.
 
-pub mod bcc;
-pub mod deviceinfo;
-pub mod dice;
-pub mod publickey;
-pub mod valueas;
-
-use std::env;
-
 use anyhow::{ensure, Result};
+use cert_request_validator::bcc;
+use std::env;
 
 fn main() -> Result<()> {
     ensure!(env::args().len() > 1, "Provide at least one bcc certificate file");
