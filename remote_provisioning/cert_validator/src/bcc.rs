@@ -23,12 +23,9 @@ pub mod entry {
         let mut payload = Payload::from_sign1(&read(&certs[0])?)
             .context("Failed to read the first bccEntry payload")?;
         for item in certs.iter().skip(1) {
-            payload
-                .check()
-                .context("Validation of BccPayload entries failed.")?;
-            payload = payload
-                .check_sign1(&read(item)?)
-                .context("Failed to read the bccEntry payload")?;
+            payload.check().context("Validation of BccPayload entries failed.")?;
+            payload =
+                payload.check_sign1(&read(item)?).context("Failed to read the bccEntry payload")?;
         }
         Ok(())
     }
@@ -45,15 +42,11 @@ pub mod entry {
             Payload::from_sign1(&CoseSign1::from_slice(&writeme).map_err(cose_error)?)
                 .context("Failed to read bccEntry payload")?;
         for item in cbor_arr.iter().skip(1) {
-            payload
-                .check()
-                .context("Validation of BccPayload entries failed")?;
+            payload.check().context("Validation of BccPayload entries failed")?;
             writeme = Vec::new();
             ciborium::ser::into_writer(item, &mut writeme)?;
             let next_sign1 = &CoseSign1::from_slice(&writeme).map_err(cose_error)?;
-            payload = payload
-                .check_sign1(next_sign1)
-                .context("Failed to read bccEntry payload")?;
+            payload = payload.check_sign1(next_sign1).context("Failed to read bccEntry payload")?;
         }
         Ok(())
     }
@@ -87,12 +80,7 @@ pub mod entry {
     impl Payload {
         /// Construct the Payload from the parent BccEntry COSE_sign1 structure.
         pub fn from_sign1(sign1: &CoseSign1) -> Result<Payload> {
-            Self::from_slice(
-                sign1
-                    .payload
-                    .as_ref()
-                    .ok_or_else(|| anyhow!("no payload"))?,
-            )
+            Self::from_slice(sign1.payload.as_ref().ok_or_else(|| anyhow!("no payload"))?)
         }
 
         /// Validate entries in the Payload to be correct.
@@ -100,9 +88,7 @@ pub mod entry {
             // Validate required fields.
             self.map_lookup(dice::ISS)?.as_string()?;
             self.map_lookup(dice::SUB)?.as_string()?;
-            SubjectPublicKey::from_payload(self)?
-                .check()
-                .context("Public key failed checking")?;
+            SubjectPublicKey::from_payload(self)?.check().context("Public key failed checking")?;
             self.map_lookup(dice::KEY_USAGE)?
                 .as_bytes()
                 .ok_or_else(|| anyhow!("Payload Key usage not bytes"))?;
@@ -126,9 +112,7 @@ pub mod entry {
             self.0
                 .check_bytes_val_if_key_in_map(dice::AUTHORITY_DESC)
                 .context("Authority descriptor value not bytes.")?;
-            self.0
-                .check_bytes_val_if_key_in_map(dice::MODE)
-                .context("Mode value not bytes.")?;
+            self.0.check_bytes_val_if_key_in_map(dice::MODE).context("Mode value not bytes.")?;
             Ok(())
         }
 
@@ -156,9 +140,7 @@ pub mod entry {
         }
 
         fn from_slice(b: &[u8]) -> Result<Self> {
-            Ok(Payload(
-                coset::cbor::de::from_reader(b).map_err(|e| anyhow!("CborError: {}", e))?,
-            ))
+            Ok(Payload(coset::cbor::de::from_reader(b).map_err(|e| anyhow!("CborError: {}", e))?))
         }
 
         fn map_lookup(&self, key: i64) -> Result<&Value> {
@@ -183,9 +165,7 @@ pub mod entry {
                 .map_lookup(dice::SUBJECT_PUBLIC_KEY)?
                 .as_bytes()
                 .ok_or_else(|| anyhow!("public key not bytes"))?;
-            Ok(SubjectPublicKey(
-                CoseKey::from_slice(bytes).map_err(cose_error)?,
-            ))
+            Ok(SubjectPublicKey(CoseKey::from_slice(bytes).map_err(cose_error)?))
         }
 
         /// Perform validation on the items in the public key.

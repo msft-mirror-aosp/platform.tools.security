@@ -44,8 +44,7 @@ impl ValueAs for Value {
     fn as_i64(&self) -> Result<i64, ValueAsError> {
         if let Value::Integer(i) = self {
             let i = i128::from(*i);
-            Ok(i.try_into()
-                .map_err(|_| ValueAsError::IntegerTooBigError())?)
+            Ok(i.try_into().map_err(|_| ValueAsError::IntegerTooBigError())?)
         } else {
             Err(ValueAsError::WrongType())
         }
@@ -54,8 +53,7 @@ impl ValueAs for Value {
     fn as_u64(&self) -> Result<u64, ValueAsError> {
         if let Value::Integer(i) = self {
             let i = i128::from(*i);
-            Ok(i.try_into()
-                .map_err(|_| ValueAsError::IntegerTooBigError())?)
+            Ok(i.try_into().map_err(|_| ValueAsError::IntegerTooBigError())?)
         } else {
             Err(ValueAsError::WrongType())
         }
@@ -160,9 +158,7 @@ impl ValueAs for Value {
     fn check_bytes_val_if_key_in_map<T: Into<Self>>(&self, key: T) -> Result<()> {
         let result = self.map_lookup(key);
         if result.is_ok() {
-            result?
-                .as_bytes()
-                .ok_or_else(|| anyhow!("map value not bytes"))?;
+            result?.as_bytes().ok_or_else(|| anyhow!("map value not bytes"))?;
         }
         Ok(())
     }
