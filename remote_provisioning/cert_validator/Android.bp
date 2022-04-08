@@ -67,6 +67,7 @@ rust_binary {
         "libcert_request_validator",
         "libanyhow",
         "libthiserror",
+        "libclap",
         "libciborium",
         "libcoset",
         "libchrono",
