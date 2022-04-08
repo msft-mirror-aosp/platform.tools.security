@@ -1,31 +1,37 @@
-package {
-    default_applicable_licenses: ["tools_security_sanitizer-status_license"],
-}
+cc_defaults {
+    name: "sanitizer-status_defaults",
 
-// Added automatically by a large-scale-change
-// http://go/android-license-faq
-license {
-    name: "tools_security_sanitizer-status_license",
-    visibility: [":__subpackages__"],
-    license_kinds: [
-        "SPDX-license-identifier-Apache-2.0",
-    ],
-    license_text: [
-        "NOTICE",
-    ],
-}
-
-cc_binary {
-    name: "sanitizer-status",
-
-    srcs: ["sanitizer-status.cpp"],
+    c_std: "c11",
     cflags: [
         "-Wall",
         "-Werror",
         "-O0",
     ],
+}
 
-    header_libs: [
-        "bionic_libc_platform_headers",
+sanitizer_status_library_shared {
+    name: "libsanitizer-status",
+    defaults: ["sanitizer-status_defaults"],
+
+    srcs: ["sanitizer-status.c"],
+}
+
+cc_binary {
+    name: "sanitizer-status",
+    defaults: ["sanitizer-status_defaults"],
+
+    srcs: ["main.c"],
+    shared_libs: ["libsanitizer-status"],
+}
+
+bootstrap_go_package {
+    name: "soong-sanitizer_status",
+    pkgPath: "android/soong/security/santizers_status",
+    deps: [
+        "blueprint",
+        "soong-android",
+        "soong-cc",
     ],
+    srcs: ["sanitizer-status.go"],
+    pluginFor: ["soong_build"],
 }
