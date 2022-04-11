@@ -5,11 +5,80 @@ use crate::publickey;
 use crate::valueas::ValueAs;
 
 use anyhow::{anyhow, ensure, Context, Result};
+use coset::AsCborValue;
 use coset::{
-    cbor::value::Value, iana, Algorithm, CborSerializable, CoseKey, CoseSign1, Header,
-    RegisteredLabel,
+    cbor::value::Value::{self, Array},
+    iana, Algorithm, CborSerializable,
+    CoseError::{self, EncodeFailed, UnexpectedItem},
+    CoseKey, CoseSign1, Header, RegisteredLabel,
 };
 use std::io::Read;
+
+/// Represents a full Boot Certificate Chain (BCC). This consists of the root public key (which
+/// signs the first certificate), followed by a chain of BccEntry certificates. Apart from the
+/// first, the issuer of each cert if the subject of the previous one.
+pub struct Chain {
+    public_key: CoseKey,
+    entries: Vec<CoseSign1>,
+}
+
+impl Chain {
+    /// Read a Chain from a file containing the CBOR encoding. This fails if the representation is
+    /// ill-formed.
+    pub fn read(fname: &str) -> Result<Chain> {
+        let mut f = std::fs::File::open(fname)?;
+        let mut content = Vec::new();
+        f.read_to_end(&mut content)?;
+        Chain::from_slice(&content).map_err(cose_error)
+    }
+
+    /// Check all certificates are correctly signed, contain the required fields, and are otherwise
+    /// semantically correct.
+    pub fn check(&self) -> Result<()> {
+        let public_key = entry::SubjectPublicKey::from_cose_key(self.public_key.clone());
+        public_key.check().context("Invalid root key")?;
+
+        let mut it = self.entries.iter();
+        let entry = it.next().unwrap();
+        let mut payload = entry::Payload::check_sign1_signature(&public_key, entry)?;
+
+        for entry in it {
+            payload.check().context("Invalid BccPayload")?;
+            payload = payload.check_sign1(entry)?;
+        }
+        Ok(())
+    }
+}
+
+impl AsCborValue for Chain {
+    /* Bcc = [
+     *     PubKeyEd25519 / PubKeyECDSA256, // DK_pub
+     *     + BccEntry,                     // Root -> leaf (KM_pub)
+     * ]
+     */
+
+    fn from_cbor_value(value: Value) -> Result<Self, CoseError> {
+        let a = match value {
+            Array(a) if a.len() >= 2 => a,
+            _ => return Err(UnexpectedItem("something", "an array with 2 or more items")),
+        };
+        let mut it = a.into_iter();
+        let public_key = CoseKey::from_cbor_value(it.next().unwrap())?;
+        let entries = it.map(CoseSign1::from_cbor_value).collect::<Result<Vec<_>, _>>()?;
+        Ok(Chain { public_key, entries })
+    }
+
+    fn to_cbor_value(self) -> Result<Value, CoseError> {
+        // TODO: Implement when needed
+        Err(EncodeFailed)
+    }
+}
+
+impl CborSerializable for Chain {}
+
+fn cose_error(ce: coset::CoseError) -> anyhow::Error {
+    anyhow!("CoseError: {:?}", ce)
+}
 
 /// This module wraps the certificate validation functions intended for BccEntry.
 pub mod entry {
@@ -18,17 +87,14 @@ pub mod entry {
     /// Read a series of bcc file certificates and verify that the public key of
     /// any given cert's payload in the series correctly signs the next cose
     /// sign1 cert.
-    pub fn check_sign1_cert_chain(certs: &[String]) -> Result<()> {
+    pub fn check_sign1_cert_chain(certs: &[&str]) -> Result<()> {
         ensure!(!certs.is_empty());
-        let mut payload = Payload::from_sign1(&read(&certs[0])?)
+        let mut payload = Payload::from_sign1(&read(certs[0])?)
             .context("Failed to read the first bccEntry payload")?;
         for item in certs.iter().skip(1) {
-            payload
-                .check()
-                .context("Validation of BccPayload entries failed.")?;
-            payload = payload
-                .check_sign1(&read(item)?)
-                .context("Failed to read the bccEntry payload")?;
+            payload.check().context("Validation of BccPayload entries failed.")?;
+            payload =
+                payload.check_sign1(&read(item).context("Failed to read the bccEntry payload")?)?;
         }
         Ok(())
     }
@@ -45,15 +111,11 @@ pub mod entry {
             Payload::from_sign1(&CoseSign1::from_slice(&writeme).map_err(cose_error)?)
                 .context("Failed to read bccEntry payload")?;
         for item in cbor_arr.iter().skip(1) {
-            payload
-                .check()
-                .context("Validation of BccPayload entries failed")?;
+            payload.check().context("Validation of BccPayload entries failed")?;
             writeme = Vec::new();
             ciborium::ser::into_writer(item, &mut writeme)?;
             let next_sign1 = &CoseSign1::from_slice(&writeme).map_err(cose_error)?;
-            payload = payload
-                .check_sign1(next_sign1)
-                .context("Failed to read bccEntry payload")?;
+            payload = payload.check_sign1(next_sign1).context("Failed to read bccEntry payload")?;
         }
         Ok(())
     }
@@ -76,23 +138,13 @@ pub mod entry {
             .all(|l| l == &RegisteredLabel::Assigned(iana::HeaderParameter::Alg)));
         Ok(())
     }
-
-    fn cose_error(ce: coset::CoseError) -> anyhow::Error {
-        anyhow!("CoseError: {:?}", ce)
-    }
-
     /// Struct describing BccPayload cbor of the BccEntry.
     #[derive(Debug)]
     pub struct Payload(Value);
     impl Payload {
         /// Construct the Payload from the parent BccEntry COSE_sign1 structure.
         pub fn from_sign1(sign1: &CoseSign1) -> Result<Payload> {
-            Self::from_slice(
-                sign1
-                    .payload
-                    .as_ref()
-                    .ok_or_else(|| anyhow!("no payload"))?,
-            )
+            Self::from_slice(sign1.payload.as_ref().ok_or_else(|| anyhow!("no payload"))?)
         }
 
         /// Validate entries in the Payload to be correct.
@@ -100,9 +152,7 @@ pub mod entry {
             // Validate required fields.
             self.map_lookup(dice::ISS)?.as_string()?;
             self.map_lookup(dice::SUB)?.as_string()?;
-            SubjectPublicKey::from_payload(self)?
-                .check()
-                .context("Public key failed checking")?;
+            SubjectPublicKey::from_payload(self)?.check().context("Public key failed checking")?;
             self.map_lookup(dice::KEY_USAGE)?
                 .as_bytes()
                 .ok_or_else(|| anyhow!("Payload Key usage not bytes"))?;
@@ -126,9 +176,7 @@ pub mod entry {
             self.0
                 .check_bytes_val_if_key_in_map(dice::AUTHORITY_DESC)
                 .context("Authority descriptor value not bytes.")?;
-            self.0
-                .check_bytes_val_if_key_in_map(dice::MODE)
-                .context("Mode value not bytes.")?;
+            self.0.check_bytes_val_if_key_in_map(dice::MODE).context("Mode value not bytes.")?;
             Ok(())
         }
 
@@ -137,17 +185,7 @@ pub mod entry {
         pub fn check_sign1(&self, sign1: &CoseSign1) -> Result<Payload> {
             let pkey = SubjectPublicKey::from_payload(self)
                 .context("Failed to construct Public key from the Bcc payload.")?;
-            check_protected_header(&pkey.0.alg, &sign1.protected.header)
-                .context("Validation of bcc entry protected header failed.")?;
-
-            let v = publickey::PublicKey::from_cose_key(&pkey.0)
-                .context("Extracting the Public key from bcc payload's coseKey failed.")?;
-            sign1
-                .verify_signature(b"", |s, m| v.verify(s, m, &pkey.0.alg))
-                .context("Payload's public key incorrectly signs the given cose_sign1 cert.")?;
-
-            let new_payload = Payload::from_sign1(sign1)
-                .context("Failed to extract bcc payload from cose_sign1")?;
+            let new_payload = Self::check_sign1_signature(&pkey, sign1)?;
             ensure!(
                 self.map_lookup(dice::SUB)? == new_payload.map_lookup(dice::ISS)?,
                 "Subject/Issuer mismatch"
@@ -155,10 +193,24 @@ pub mod entry {
             Ok(new_payload)
         }
 
+        pub(super) fn check_sign1_signature(
+            pkey: &SubjectPublicKey,
+            sign1: &CoseSign1,
+        ) -> Result<Payload> {
+            check_protected_header(&pkey.0.alg, &sign1.protected.header)
+                .context("Validation of bcc entry protected header failed.")?;
+            let v = publickey::PublicKey::from_cose_key(&pkey.0)
+                .context("Extracting the Public key from coseKey failed.")?;
+            sign1
+                .verify_signature(b"", |s, m| v.verify(s, m, &pkey.0.alg))
+                .context("public key incorrectly signs the given cose_sign1 cert.")?;
+            let new_payload = Payload::from_sign1(sign1)
+                .context("Failed to extract bcc payload from cose_sign1")?;
+            Ok(new_payload)
+        }
+
         fn from_slice(b: &[u8]) -> Result<Self> {
-            Ok(Payload(
-                coset::cbor::de::from_reader(b).map_err(|e| anyhow!("CborError: {}", e))?,
-            ))
+            Ok(Payload(coset::cbor::de::from_reader(b).map_err(|e| anyhow!("CborError: {}", e))?))
         }
 
         fn map_lookup(&self, key: i64) -> Result<&Value> {
@@ -177,15 +229,17 @@ pub mod entry {
     /// and the methods used for its validation.
     pub struct SubjectPublicKey(CoseKey);
     impl SubjectPublicKey {
+        pub(super) fn from_cose_key(cose_key: CoseKey) -> Self {
+            Self(cose_key)
+        }
+
         /// Construct the SubjectPublicKey from the (bccEntry's) Payload.
         pub fn from_payload(payload: &Payload) -> Result<SubjectPublicKey> {
             let bytes = payload
                 .map_lookup(dice::SUBJECT_PUBLIC_KEY)?
                 .as_bytes()
                 .ok_or_else(|| anyhow!("public key not bytes"))?;
-            Ok(SubjectPublicKey(
-                CoseKey::from_slice(bytes).map_err(cose_error)?,
-            ))
+            Ok(SubjectPublicKey(CoseKey::from_slice(bytes).map_err(cose_error)?))
         }
 
         /// Perform validation on the items in the public key.
