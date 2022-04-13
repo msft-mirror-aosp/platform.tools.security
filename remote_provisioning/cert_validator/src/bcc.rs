@@ -18,6 +18,7 @@ use std::io::Read;
 /// signs the first certificate), followed by a chain of BccEntry certificates. Apart from the
 /// first, the issuer of each cert if the subject of the previous one.
 pub struct Chain {
+    
     public_key: CoseKey,
     entries: Vec<CoseSign1>,
 }
@@ -157,7 +158,17 @@ pub mod entry {
                 .as_bytes()
                 .ok_or_else(|| anyhow!("Payload Key usage not bytes"))?;
 
-            // Validate optional fields.
+            // Validate required and optional fields. The required fields are those defined
+            // to be present for CDI_Certificates in the open-DICE profile.
+            // TODO: Check if the optional fields are present, and if so, ensure that
+            //       the operations applied to the mandatory fields actually reproduce the
+            //       values in the optional fields as specified in open-DICE.
+            self.0.map_lookup(dice::CODE_HASH).context("Code hash must be present.")?;
+            self.0.map_lookup(dice::CONFIG_DESC).context("Config descriptor must be present.")?;
+            self.0.map_lookup(dice::AUTHORITY_HASH).context("Authority hash must be present.")?;
+            self.0.map_lookup(dice::MODE).context("Mode must be present.")?;
+
+            // Verify that each key that does exist has the expected type.
             self.0
                 .check_bytes_val_if_key_in_map(dice::CODE_HASH)
                 .context("Code Hash value not bytes.")?;
