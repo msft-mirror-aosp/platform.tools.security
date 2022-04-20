@@ -4,14 +4,17 @@ use crate::dice;
 use crate::publickey;
 use crate::valueas::ValueAs;
 
+use self::entry::SubjectPublicKey;
 use anyhow::{anyhow, ensure, Context, Result};
 use coset::AsCborValue;
 use coset::{
     cbor::value::Value::{self, Array},
-    iana, Algorithm, CborSerializable,
+    iana::{self, EnumI64},
+    Algorithm, CborSerializable,
     CoseError::{self, EncodeFailed, UnexpectedItem},
     CoseKey, CoseSign1, Header, RegisteredLabel,
 };
+use std::fmt;
 use std::io::Read;
 
 /// Represents a full Boot Certificate Chain (BCC). This consists of the root public key (which
@@ -35,24 +38,37 @@ impl Chain {
 
     /// Check all certificates are correctly signed, contain the required fields, and are otherwise
     /// semantically correct.
-    pub fn check(&self) -> Result<()> {
-        let public_key = entry::SubjectPublicKey::from_cose_key(self.public_key.clone());
+    pub fn check(&self) -> Result<Vec<entry::Payload>> {
+        let public_key = SubjectPublicKey::from_cose_key(self.public_key.clone());
         public_key.check().context("Invalid root key")?;
 
         let mut it = self.entries.iter();
         let entry = it.next().unwrap();
         let mut payload = entry::Payload::check_sign1_signature(&public_key, entry)?;
+        let mut payloads = Vec::with_capacity(self.entries.len());
 
         for entry in it {
             payload.check().context("Invalid BccPayload")?;
-            payload = payload.check_sign1(entry)?;
+            let next_payload = payload.check_sign1(entry)?;
+            payloads.push(payload);
+            payload = next_payload;
         }
-        Ok(())
+        payloads.push(payload);
+        Ok(payloads)
+    }
+
+    /// Return the public key that can be used to verify the signature on the first certificate in
+    /// the chain.
+    pub fn get_root_public_key(&self) -> SubjectPublicKey {
+        SubjectPublicKey::from_cose_key(self.public_key.clone())
     }
 }
 
 impl AsCborValue for Chain {
-    /* Bcc = [
+    /*
+     * CDDL (from keymint/ProtectedData.aidl):
+     *
+     * Bcc = [
      *     PubKeyEd25519 / PubKeyECDSA256, // DK_pub
      *     + BccEntry,                     // Root -> leaf (KM_pub)
      * ]
@@ -83,6 +99,8 @@ fn cose_error(ce: coset::CoseError) -> anyhow::Error {
 
 /// This module wraps the certificate validation functions intended for BccEntry.
 pub mod entry {
+    use std::fmt::{Display, Formatter, Write};
+
     use super::*;
 
     /// Read a series of bcc file certificates and verify that the public key of
@@ -250,6 +268,10 @@ pub mod entry {
                 .map_lookup(dice::SUBJECT_PUBLIC_KEY)?
                 .as_bytes()
                 .ok_or_else(|| anyhow!("public key not bytes"))?;
+            Self::from_slice(bytes)
+        }
+
+        fn from_slice(bytes: &[u8]) -> Result<SubjectPublicKey> {
             Ok(SubjectPublicKey(CoseKey::from_slice(bytes).map_err(cose_error)?))
         }
 
@@ -273,5 +295,175 @@ pub mod entry {
             ensure!(crv == &Value::from(iana::EllipticCurve::Ed25519 as i64));
             Ok(())
         }
+    }
+
+    struct ConfigDesc(Vec<(Value, Value)>);
+
+    impl AsCborValue for ConfigDesc {
+        /*
+         * CDDL (from keymint/ProtectedData.aidl):
+         *
+         *  bstr .cbor {      // Configuration Descriptor
+         *     ? -70002 : tstr,           // Component name
+         *     ? -70003 : int,            // Firmware version
+         *     ? -70004 : null,           // Resettable
+         * },
+         */
+
+        fn from_cbor_value(value: Value) -> Result<Self, CoseError> {
+            match value {
+                Value::Map(m) => Ok(Self(m)),
+                _ => Err(UnexpectedItem("something", "a map")),
+            }
+        }
+
+        fn to_cbor_value(self) -> Result<Value, CoseError> {
+            // TODO: Implement when needed
+            Err(EncodeFailed)
+        }
+    }
+
+    impl CborSerializable for ConfigDesc {}
+
+    impl Display for ConfigDesc {
+        fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
+            write_payload_label(f, dice::CONFIG_DESC)?;
+            f.write_str(":\n")?;
+            for (label, value) in &self.0 {
+                f.write_str("  ")?;
+                if let Ok(i) = label.as_i64() {
+                    write_config_desc_label(f, i)?;
+                } else {
+                    write_value(f, label)?;
+                }
+                f.write_str(": ")?;
+                write_value(f, value)?;
+                f.write_char('\n')?;
+            }
+            Ok(())
+        }
+    }
+
+    fn write_config_desc_label(f: &mut Formatter, label: i64) -> Result<(), fmt::Error> {
+        match label {
+            dice::COMPONENT_NAME => f.write_str("Component Name"),
+            dice::FIRMWARE_VERSION => f.write_str("Firmware Version"),
+            dice::RESETTABLE => f.write_str("Resettable"),
+            _ => write!(f, "{}", label),
+        }
+    }
+
+    impl Display for SubjectPublicKey {
+        fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
+            let pkey = &self.0;
+            if pkey.kty != coset::KeyType::Assigned(iana::KeyType::OKP)
+                || pkey.alg != Some(coset::Algorithm::Assigned(iana::Algorithm::EdDSA))
+            {
+                return Err(fmt::Error);
+            }
+
+            let mut separator = "";
+            for (label, value) in &pkey.params {
+                use coset::Label;
+                use iana::OkpKeyParameter;
+                if let Label::Int(i) = label {
+                    match OkpKeyParameter::from_i64(*i) {
+                        Some(OkpKeyParameter::Crv) => {
+                            if let Some(crv) =
+                                value.as_i64().ok().and_then(iana::EllipticCurve::from_i64)
+                            {
+                                f.write_str(separator)?;
+                                write!(f, "Curve: {:?}", crv)?;
+                                separator = " ";
+                            }
+                        }
+                        Some(OkpKeyParameter::X) => {
+                            if let Ok(x) = ValueAs::as_bytes(value) {
+                                f.write_str(separator)?;
+                                f.write_str("X: ")?;
+                                write_bytes_in_hex(f, x)?;
+                                separator = " ";
+                            }
+                        }
+                        _ => (),
+                    }
+                }
+            }
+
+            Ok(())
+        }
+    }
+
+    impl Display for Payload {
+        fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
+            for (label, value) in self.0.as_map().ok_or(fmt::Error)? {
+                if let Ok(i) = label.as_i64() {
+                    if i == dice::CONFIG_DESC {
+                        write_config_desc(f, value)?;
+                        continue;
+                    } else if i == dice::SUBJECT_PUBLIC_KEY {
+                        write_payload_label(f, i)?;
+                        f.write_str(": ")?;
+                        write_subject_public_key(f, value)?;
+                        continue;
+                    }
+                    write_payload_label(f, i)?;
+                } else {
+                    write_value(f, label)?;
+                }
+                f.write_str(": ")?;
+                write_value(f, value)?;
+                f.write_char('\n')?;
+            }
+            Ok(())
+        }
+    }
+
+    fn write_payload_label(f: &mut Formatter, label: i64) -> Result<(), fmt::Error> {
+        match label {
+            dice::ISS => f.write_str("Issuer"),
+            dice::SUB => f.write_str("Subject"),
+            dice::CODE_HASH => f.write_str("Code Hash"),
+            dice::CODE_DESC => f.write_str("Code Desc"),
+            dice::CONFIG_DESC => f.write_str("Config Desc"),
+            dice::CONFIG_HASH => f.write_str("Config Hash"),
+            dice::AUTHORITY_HASH => f.write_str("Authority Hash"),
+            dice::AUTHORITY_DESC => f.write_str("Authority Desc"),
+            dice::MODE => f.write_str("Mode"),
+            dice::SUBJECT_PUBLIC_KEY => f.write_str("Subject Public Key"),
+            dice::KEY_USAGE => f.write_str("Key Usage"),
+            _ => write!(f, "{}", label),
+        }
+    }
+
+    fn write_config_desc(f: &mut Formatter, value: &Value) -> Result<(), fmt::Error> {
+        let bytes = value.as_bytes().ok_or(fmt::Error)?;
+        let config_desc = ConfigDesc::from_slice(bytes).map_err(|_| fmt::Error)?;
+        write!(f, "{}", config_desc)
+    }
+
+    fn write_subject_public_key(f: &mut Formatter, value: &Value) -> Result<(), fmt::Error> {
+        let bytes = value.as_bytes().ok_or(fmt::Error)?;
+        let subject_public_key = SubjectPublicKey::from_slice(bytes).map_err(|_| fmt::Error)?;
+        write!(f, "{}", subject_public_key)
+    }
+
+    fn write_value(f: &mut Formatter, value: &Value) -> Result<(), fmt::Error> {
+        if let Some(bytes) = value.as_bytes() {
+            write_bytes_in_hex(f, bytes)
+        } else if let Some(text) = value.as_text() {
+            write!(f, "\"{}\"", text)
+        } else if let Ok(integer) = value.as_i64() {
+            write!(f, "{}", integer)
+        } else {
+            write!(f, "{:?}", value)
+        }
+    }
+
+    fn write_bytes_in_hex(f: &mut Formatter, bytes: &[u8]) -> Result<(), fmt::Error> {
+        for b in bytes {
+            write!(f, "{:02x}", b)?
+        }
+        Ok(())
     }
 }
