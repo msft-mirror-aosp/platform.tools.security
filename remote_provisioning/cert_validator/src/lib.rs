@@ -42,17 +42,17 @@ mod tests {
             &bcc::entry::read("testdata/open-dice/_CBOR_Ed25519_cert_full_cert_chain_0.cert")
                 .unwrap(),
         );
-        assert!(payload.is_ok());
+        assert!(payload.is_ok(), "Payload not okay: {:?}", payload);
         let payload = payload.unwrap().check_sign1(
             &bcc::entry::read("testdata/open-dice/_CBOR_Ed25519_cert_full_cert_chain_1.cert")
                 .unwrap(),
         );
-        assert!(payload.is_ok());
+        assert!(payload.is_ok(), "Payload not okay: {:?}", payload);
         let payload = payload.unwrap().check_sign1(
             &bcc::entry::read("testdata/open-dice/_CBOR_Ed25519_cert_full_cert_chain_2.cert")
                 .unwrap(),
         );
-        assert!(payload.is_ok());
+        assert!(payload.is_ok(), "Payload not okay: {:?}", payload);
     }
 
     #[test]
@@ -88,6 +88,20 @@ mod tests {
         let payloads = chain.check()?;
         assert_eq!(payloads.len(), 8);
         Ok(())
+    }
+
+    #[test]
+    fn test_check_chain_valid_p256() -> Result<()> {
+        let chain = bcc::Chain::read("testdata/bcc/valid_p256.chain").unwrap();
+        let payloads = chain.check()?;
+        assert_eq!(payloads.len(), 3);
+        Ok(())
+    }
+
+    #[test]
+    fn test_check_chain_bad_p256() {
+        let chain = bcc::Chain::read("testdata/bcc/bad_p256.chain").unwrap();
+        assert!(chain.check().is_err());
     }
 
     #[test]
