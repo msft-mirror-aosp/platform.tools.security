@@ -78,14 +78,16 @@ mod tests {
     fn test_check_sign1_chain_array() {
         let cbor_file = &file_value("testdata/open-dice/_CBOR_bcc_entry_cert_array.cert").unwrap();
         let cbor_arr = ValueAs::as_array(cbor_file).unwrap();
-        assert!(cbor_arr.len() == 3);
+        assert_eq!(cbor_arr.len(), 3);
         assert!(bcc::entry::check_sign1_chain_array(cbor_arr).is_ok());
     }
 
     #[test]
     fn test_check_chain_valid() -> Result<()> {
         let chain = bcc::Chain::read("testdata/bcc/valid.chain").unwrap();
-        chain.check()
+        let payloads = chain.check()?;
+        assert_eq!(payloads.len(), 8);
+        Ok(())
     }
 
     #[test]
