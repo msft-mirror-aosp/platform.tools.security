@@ -5,7 +5,7 @@ use crate::publickey;
 use crate::valueas::ValueAs;
 
 use self::entry::SubjectPublicKey;
-use anyhow::{anyhow, ensure, Context, Result};
+use anyhow::{anyhow, bail, ensure, Context, Result};
 use coset::AsCborValue;
 use coset::{
     cbor::value::Value::{self, Array},
@@ -21,7 +21,6 @@ use std::io::Read;
 /// signs the first certificate), followed by a chain of BccEntry certificates. Apart from the
 /// first, the issuer of each cert if the subject of the previous one.
 pub struct Chain {
-    
     public_key: CoseKey,
     entries: Vec<CoseSign1>,
 }
@@ -44,7 +43,8 @@ impl Chain {
 
         let mut it = self.entries.iter();
         let entry = it.next().unwrap();
-        let mut payload = entry::Payload::check_sign1_signature(&public_key, entry)?;
+        let mut payload = entry::Payload::check_sign1_signature(&public_key, entry)
+            .context("Failed initial signature check.")?;
         let mut payloads = Vec::with_capacity(self.entries.len());
 
         for entry in it {
@@ -97,6 +97,22 @@ fn cose_error(ce: coset::CoseError) -> anyhow::Error {
     anyhow!("CoseError: {:?}", ce)
 }
 
+/// Get the value corresponding to the provided label within the supplied CoseKey
+/// or error if it's not present.
+pub fn get_label_value(key: &coset::CoseKey, label: i64) -> Result<&Value> {
+    Ok(&key
+        .params
+        .iter()
+        .find(|(k, _)| k == &coset::Label::Int(label))
+        .ok_or_else(|| anyhow!("Label {:?} not found", label))?
+        .1)
+}
+
+/// Get the byte string for the corresponding label within the key if the label exists
+/// and the value is actually a byte array.
+pub fn get_label_value_as_bytes(key: &coset::CoseKey, label: i64) -> Result<&Vec<u8>> {
+    get_label_value(key, label)?.as_bytes().ok_or_else(|| anyhow!("Value not a bstr."))
+}
 /// This module wraps the certificate validation functions intended for BccEntry.
 pub mod entry {
     use std::fmt::{Display, Formatter, Write};
@@ -278,21 +294,24 @@ pub mod entry {
         /// Perform validation on the items in the public key.
         pub fn check(&self) -> Result<()> {
             let pkey = &self.0;
-            ensure!(pkey.kty == coset::KeyType::Assigned(iana::KeyType::OKP));
-            // TODO: Follow up cl - add the case for ECDSA.
-            ensure!(pkey.alg == Some(coset::Algorithm::Assigned(iana::Algorithm::EdDSA)));
             if !pkey.key_ops.is_empty() {
                 ensure!(pkey
                     .key_ops
                     .contains(&coset::KeyOperation::Assigned(iana::KeyOperation::Verify)));
             }
-            let crv = &pkey
-                .params
-                .iter()
-                .find(|(k, _)| k == &coset::Label::Int(iana::OkpKeyParameter::Crv as i64))
-                .ok_or_else(|| anyhow!("Curve not found"))?
-                .1;
-            ensure!(crv == &Value::from(iana::EllipticCurve::Ed25519 as i64));
+            match pkey.kty {
+                coset::KeyType::Assigned(iana::KeyType::OKP) => {
+                    ensure!(pkey.alg == Some(coset::Algorithm::Assigned(iana::Algorithm::EdDSA)));
+                    let crv = get_label_value(pkey, iana::OkpKeyParameter::Crv as i64)?;
+                    ensure!(crv == &Value::from(iana::EllipticCurve::Ed25519 as i64));
+                }
+                coset::KeyType::Assigned(iana::KeyType::EC2) => {
+                    ensure!(pkey.alg == Some(coset::Algorithm::Assigned(iana::Algorithm::ES256)));
+                    let crv = get_label_value(pkey, iana::Ec2KeyParameter::Crv as i64)?;
+                    ensure!(crv == &Value::from(iana::EllipticCurve::P_256 as i64));
+                }
+                _ => bail!("Unexpected KeyType value: {:?}", pkey.kty),
+            }
             Ok(())
         }
     }
