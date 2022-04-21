@@ -9,7 +9,11 @@ use clap::{Arg, SubCommand};
 
 fn main() -> Result<()> {
     let app = clap::App::new("bcc_validator")
-        .subcommand(SubCommand::with_name("verify-chain").arg(Arg::with_name("chain")))
+        .subcommand(
+            SubCommand::with_name("verify-chain")
+                .arg(Arg::with_name("dump").long("dump"))
+                .arg(Arg::with_name("chain")),
+        )
         .subcommand(
             SubCommand::with_name("verify-certs")
                 .arg(Arg::with_name("certs").multiple(true).min_values(1)),
@@ -19,7 +23,17 @@ fn main() -> Result<()> {
     match args.subcommand() {
         ("verify-chain", Some(sub_args)) => {
             if let Some(chain) = sub_args.value_of("chain") {
-                return bcc::Chain::read(chain)?.check();
+                let chain = bcc::Chain::read(chain)?;
+                let payloads = chain.check()?;
+                if sub_args.is_present("dump") {
+                    println!("Root public key: {}", chain.get_root_public_key());
+                    println!();
+                    for (i, payload) in payloads.iter().enumerate() {
+                        println!("Cert {}:", i);
+                        println!("{}", payload);
+                    }
+                }
+                return Ok(());
             }
         }
         ("verify-certs", Some(sub_args)) => {
