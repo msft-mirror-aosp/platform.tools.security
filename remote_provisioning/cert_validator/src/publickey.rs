@@ -1,10 +1,12 @@
 //! This module describes the public key (PubKeyEd25519 or PubKeyECDSA256)
 //! used in the BccPayload. The key itself is stored as a simple byte array in
-//! a vector. For now, only PubKeyEd25519 types of cbor public keys are supported.
+//! a vector.
 
 use crate::bcc::get_label_value_as_bytes;
+use crate::display::write_bytes_in_hex;
 use anyhow::{bail, ensure, Context, Result};
 use coset::{iana, Algorithm, CoseKey};
+use std::fmt::{self, Display, Formatter};
 use std::ptr;
 
 /// Length of an Ed25519 public key.
@@ -214,6 +216,24 @@ impl PublicKey {
                     PublicKey::verify_p256(signature, message, ec_point_slice)? == 1,
                     "Signature verification failed."
                 );
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Display for PublicKey {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
+        match self.key {
+            PubKey::Ed25519 { pub_key } => {
+                f.write_str("Ed25519 X: ")?;
+                write_bytes_in_hex(f, &pub_key)?;
+            }
+            PubKey::P256 { x_coord, y_coord } => {
+                f.write_str("P256 X: ")?;
+                write_bytes_in_hex(f, &x_coord)?;
+                f.write_str(" Y: ")?;
+                write_bytes_in_hex(f, &y_coord)?;
             }
         }
         Ok(())
