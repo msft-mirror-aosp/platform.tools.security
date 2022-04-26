@@ -5,6 +5,7 @@
 pub mod bcc;
 pub mod deviceinfo;
 pub mod dice;
+mod display;
 pub mod publickey;
 pub mod valueas;
 
