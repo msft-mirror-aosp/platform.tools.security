@@ -2,14 +2,14 @@
 
 use super::{cose_error, get_label_value};
 use crate::dice;
-use crate::publickey;
+use crate::display::write_value;
+use crate::publickey::PublicKey;
 use crate::valueas::ValueAs;
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use coset::AsCborValue;
 use coset::{
     cbor::value::Value,
-    iana::{self, EnumI64},
-    Algorithm, CborSerializable,
+    iana, Algorithm, CborSerializable,
     CoseError::{self, EncodeFailed, UnexpectedItem},
     CoseKey, CoseSign1, Header, RegisteredLabel,
 };
@@ -140,7 +140,7 @@ impl Payload {
     ) -> Result<Payload> {
         check_protected_header(&pkey.0.alg, &sign1.protected.header)
             .context("Validation of bcc entry protected header failed.")?;
-        let v = publickey::PublicKey::from_cose_key(&pkey.0)
+        let v = PublicKey::from_cose_key(&pkey.0)
             .context("Extracting the Public key from coseKey failed.")?;
         sign1
             .verify_signature(b"", |s, m| v.verify(s, m, &pkey.0.alg))
@@ -264,48 +264,14 @@ fn write_config_desc_label(f: &mut Formatter, label: i64) -> Result<(), fmt::Err
         dice::COMPONENT_NAME => f.write_str("Component Name"),
         dice::FIRMWARE_VERSION => f.write_str("Firmware Version"),
         dice::RESETTABLE => f.write_str("Resettable"),
-        _ => write!(f, "{}", label),
+        _ => label.fmt(f),
     }
 }
 
 impl Display for SubjectPublicKey {
     fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
-        let pkey = &self.0;
-        if pkey.kty != coset::KeyType::Assigned(iana::KeyType::OKP)
-            || pkey.alg != Some(coset::Algorithm::Assigned(iana::Algorithm::EdDSA))
-        {
-            return Err(fmt::Error);
-        }
-
-        let mut separator = "";
-        for (label, value) in &pkey.params {
-            use coset::Label;
-            use iana::OkpKeyParameter;
-            if let Label::Int(i) = label {
-                match OkpKeyParameter::from_i64(*i) {
-                    Some(OkpKeyParameter::Crv) => {
-                        if let Some(crv) =
-                            value.as_i64().ok().and_then(iana::EllipticCurve::from_i64)
-                        {
-                            f.write_str(separator)?;
-                            write!(f, "Curve: {:?}", crv)?;
-                            separator = " ";
-                        }
-                    }
-                    Some(OkpKeyParameter::X) => {
-                        if let Ok(x) = ValueAs::as_bytes(value) {
-                            f.write_str(separator)?;
-                            f.write_str("X: ")?;
-                            write_bytes_in_hex(f, x)?;
-                            separator = " ";
-                        }
-                    }
-                    _ => (),
-                }
-            }
-        }
-
-        Ok(())
+        let pkey = PublicKey::from_cose_key(&self.0).map_err(|_| fmt::Error)?;
+        pkey.fmt(f)
     }
 }
 
@@ -347,37 +313,18 @@ fn write_payload_label(f: &mut Formatter, label: i64) -> Result<(), fmt::Error> 
         dice::MODE => f.write_str("Mode"),
         dice::SUBJECT_PUBLIC_KEY => f.write_str("Subject Public Key"),
         dice::KEY_USAGE => f.write_str("Key Usage"),
-        _ => write!(f, "{}", label),
+        _ => label.fmt(f),
     }
 }
 
 fn write_config_desc(f: &mut Formatter, value: &Value) -> Result<(), fmt::Error> {
     let bytes = value.as_bytes().ok_or(fmt::Error)?;
     let config_desc = ConfigDesc::from_slice(bytes).map_err(|_| fmt::Error)?;
-    write!(f, "{}", config_desc)
+    config_desc.fmt(f)
 }
 
 fn write_subject_public_key(f: &mut Formatter, value: &Value) -> Result<(), fmt::Error> {
     let bytes = value.as_bytes().ok_or(fmt::Error)?;
     let subject_public_key = SubjectPublicKey::from_slice(bytes).map_err(|_| fmt::Error)?;
-    write!(f, "{}", subject_public_key)
-}
-
-fn write_value(f: &mut Formatter, value: &Value) -> Result<(), fmt::Error> {
-    if let Some(bytes) = value.as_bytes() {
-        write_bytes_in_hex(f, bytes)
-    } else if let Some(text) = value.as_text() {
-        write!(f, "\"{}\"", text)
-    } else if let Ok(integer) = value.as_i64() {
-        write!(f, "{}", integer)
-    } else {
-        write!(f, "{:?}", value)
-    }
-}
-
-fn write_bytes_in_hex(f: &mut Formatter, bytes: &[u8]) -> Result<(), fmt::Error> {
-    for b in bytes {
-        write!(f, "{:02x}", b)?
-    }
-    Ok(())
+    writeln!(f, "{}", subject_public_key)
 }
