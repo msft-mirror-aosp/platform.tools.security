@@ -31,7 +31,7 @@ cc_fuzz {
       shared_libs: [
           "libz",
           "libexpat",
-          "libandroidicu",
+          "libicu",
           "libcutils",
           "libEGL",
           "libGLESv2",
