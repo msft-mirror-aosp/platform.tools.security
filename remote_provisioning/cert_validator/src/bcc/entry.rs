@@ -74,12 +74,12 @@ pub fn check_protected_header(alg: &Option<Algorithm>, header: &Header) -> Resul
 pub struct Payload(Value);
 impl Payload {
     /// Construct the Payload from the parent BccEntry COSE_sign1 structure.
-    pub fn from_sign1(sign1: &CoseSign1) -> Result<Payload> {
+    fn from_sign1(sign1: &CoseSign1) -> Result<Payload> {
         Self::from_slice(sign1.payload.as_ref().ok_or_else(|| anyhow!("no payload"))?)
     }
 
     /// Validate entries in the Payload to be correct.
-    pub fn check(&self) -> Result<()> {
+    pub(super) fn check(&self) -> Result<()> {
         // Validate required fields.
         self.map_lookup(dice::ISS)?.as_string()?;
         self.map_lookup(dice::SUB)?.as_string()?;
@@ -123,7 +123,7 @@ impl Payload {
 
     /// Verify that the public key of this payload correctly signs the provided
     /// BccEntry sign1 object.
-    pub fn check_sign1(&self, sign1: &CoseSign1) -> Result<Payload> {
+    pub(super) fn check_sign1(&self, sign1: &CoseSign1) -> Result<Payload> {
         let pkey = SubjectPublicKey::from_payload(self)
             .context("Failed to construct Public key from the Bcc payload.")?;
         let new_payload = Self::check_sign1_signature(&pkey, sign1)?;
@@ -142,9 +142,9 @@ impl Payload {
             .context("Validation of bcc entry protected header failed.")?;
         let v = PublicKey::from_cose_key(&pkey.0)
             .context("Extracting the Public key from coseKey failed.")?;
-        sign1
-            .verify_signature(b"", |s, m| v.verify(s, m, &pkey.0.alg))
-            .context("public key incorrectly signs the given cose_sign1 cert.")?;
+        sign1.verify_signature(b"", |s, m| v.verify(s, m, &pkey.0.alg)).with_context(|| {
+            format!("public key {} incorrectly signs the given cose_sign1 cert.", pkey)
+        })?;
         let new_payload =
             Payload::from_sign1(sign1).context("Failed to extract bcc payload from cose_sign1")?;
         Ok(new_payload)
@@ -327,4 +327,85 @@ fn write_subject_public_key(f: &mut Formatter, value: &Value) -> Result<(), fmt:
     let bytes = value.as_bytes().ok_or(fmt::Error)?;
     let subject_public_key = SubjectPublicKey::from_slice(bytes).map_err(|_| fmt::Error)?;
     writeln!(f, "{}", subject_public_key)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::file_value;
+    use crate::valueas::ValueAs;
+    use coset::{iana, Header, Label, RegisteredLabel};
+
+    #[test]
+    fn test_bcc_payload_check() {
+        let payload = Payload::from_sign1(
+            &read("testdata/open-dice/_CBOR_Ed25519_cert_full_cert_chain_0.cert").unwrap(),
+        );
+        assert!(payload.is_ok());
+
+        let payload = payload.unwrap();
+        assert!(payload.check().is_ok());
+    }
+
+    #[test]
+    fn test_bcc_payload_check_sign1() {
+        let payload = Payload::from_sign1(
+            &read("testdata/open-dice/_CBOR_Ed25519_cert_full_cert_chain_0.cert").unwrap(),
+        );
+        assert!(payload.is_ok(), "Payload not okay: {:?}", payload);
+        let payload = payload.unwrap().check_sign1(
+            &read("testdata/open-dice/_CBOR_Ed25519_cert_full_cert_chain_1.cert").unwrap(),
+        );
+        assert!(payload.is_ok(), "Payload not okay: {:?}", payload);
+        let payload = payload.unwrap().check_sign1(
+            &read("testdata/open-dice/_CBOR_Ed25519_cert_full_cert_chain_2.cert").unwrap(),
+        );
+        assert!(payload.is_ok(), "Payload not okay: {:?}", payload);
+    }
+
+    #[test]
+    fn test_check_sign1_cert_chain() {
+        let arr: Vec<&str> = vec![
+            "testdata/open-dice/_CBOR_Ed25519_cert_full_cert_chain_0.cert",
+            "testdata/open-dice/_CBOR_Ed25519_cert_full_cert_chain_1.cert",
+            "testdata/open-dice/_CBOR_Ed25519_cert_full_cert_chain_2.cert",
+        ];
+        assert!(check_sign1_cert_chain(&arr).is_ok());
+    }
+
+    #[test]
+    fn test_check_sign1_cert_chain_invalid() {
+        let arr: Vec<&str> = vec![
+            "testdata/open-dice/_CBOR_Ed25519_cert_full_cert_chain_0.cert",
+            "testdata/open-dice/_CBOR_Ed25519_cert_full_cert_chain_2.cert",
+        ];
+        assert!(check_sign1_cert_chain(&arr).is_err());
+    }
+
+    #[test]
+    fn test_check_sign1_chain_array() {
+        let cbor_file = &file_value("testdata/open-dice/_CBOR_bcc_entry_cert_array.cert").unwrap();
+        let cbor_arr = ValueAs::as_array(cbor_file).unwrap();
+        assert_eq!(cbor_arr.len(), 3);
+        assert!(check_sign1_chain_array(cbor_arr).is_ok());
+    }
+
+    #[test]
+    fn test_check_bcc_entry_protected_header() -> Result<()> {
+        let eddsa = Some(coset::Algorithm::Assigned(iana::Algorithm::EdDSA));
+        let header = Header { alg: (&eddsa).clone(), ..Default::default() };
+        check_protected_header(&eddsa, &header).context("Only alg allowed")?;
+        let header = Header { alg: Some(coset::Algorithm::PrivateUse(1000)), ..Default::default() };
+        assert!(check_protected_header(&eddsa, &header).is_err());
+        let mut header = Header { alg: (&eddsa).clone(), ..Default::default() };
+        header.rest.push((Label::Int(1000), Value::from(2000u16)));
+        check_protected_header(&eddsa, &header).context("non-crit header allowed")?;
+        let mut header = Header { alg: (&eddsa).clone(), ..Default::default() };
+        header.crit.push(RegisteredLabel::Assigned(iana::HeaderParameter::Alg));
+        check_protected_header(&eddsa, &header).context("OK to say alg is critical")?;
+        let mut header = Header { alg: (&eddsa).clone(), ..Default::default() };
+        header.crit.push(RegisteredLabel::Assigned(iana::HeaderParameter::CounterSignature));
+        assert!(check_protected_header(&eddsa, &header).is_err());
+        Ok(())
+    }
 }
