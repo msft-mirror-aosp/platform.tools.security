@@ -37,19 +37,18 @@ impl Chain {
         let public_key = SubjectPublicKey::from_cose_key(self.public_key.clone());
         public_key.check().context("Invalid root key")?;
 
-        let mut it = self.entries.iter();
-        let entry = it.next().unwrap();
-        let mut payload = entry::Payload::check_sign1_signature(&public_key, entry)
-            .context("Failed initial signature check.")?;
-        let mut payloads = Vec::with_capacity(self.entries.len());
-
-        for entry in it {
-            payload.check().context("Invalid BccPayload")?;
-            let next_payload = payload.check_sign1(entry)?;
+        let mut payloads = Vec::<entry::Payload>::with_capacity(self.entries.len());
+        let mut previous = payloads.last();
+        for (n, entry) in self.entries.iter().enumerate() {
+            let payload = match previous {
+                None => entry::Payload::check_sign1_signature(&public_key, entry),
+                Some(payload) => payload.check_sign1(entry),
+            }
+            .with_context(|| format!("Failed signature check of certificate at index {}", n))?;
+            payload.check().with_context(|| format!("Invalid BccPayload at index {}", n))?;
             payloads.push(payload);
-            payload = next_payload;
+            previous = payloads.last();
         }
-        payloads.push(payload);
         Ok(payloads)
     }
 
