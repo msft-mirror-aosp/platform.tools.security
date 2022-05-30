@@ -6,6 +6,7 @@
 use anyhow::{bail, Result};
 use cert_request_validator::bcc;
 use clap::{Arg, SubCommand};
+use std::fs;
 
 fn main() -> Result<()> {
     let app = clap::App::new("bcc_validator")
@@ -23,15 +24,9 @@ fn main() -> Result<()> {
     match args.subcommand() {
         ("verify-chain", Some(sub_args)) => {
             if let Some(chain) = sub_args.value_of("chain") {
-                let chain = bcc::Chain::read(chain)?;
-                let payloads = chain.check()?;
+                let chain = bcc::Chain::from_bytes(&fs::read(chain)?)?;
                 if sub_args.is_present("dump") {
-                    println!("Root public key: {}", chain.get_root_public_key());
-                    println!();
-                    for (i, payload) in payloads.iter().enumerate() {
-                        println!("Cert {}:", i);
-                        println!("{}", payload);
-                    }
+                    print!("{}", chain);
                 }
                 return Ok(());
             }
