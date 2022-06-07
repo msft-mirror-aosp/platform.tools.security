@@ -2,6 +2,7 @@
 
 mod chain;
 pub mod entry;
+mod field_value;
 
 use anyhow::{anyhow, Result};
 pub use chain::Chain;
