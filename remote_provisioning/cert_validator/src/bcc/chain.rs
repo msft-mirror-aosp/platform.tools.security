@@ -1,15 +1,9 @@
 //! This module provides a wrapper describing a valid Boot Certificate Chain.
 
 use super::cose_error;
-use super::entry::Payload;
-use super::entry::SubjectPublicKey;
-use anyhow::{Context, Result};
-use coset::{
-    cbor::value::Value::{self, Array},
-    AsCborValue, CborSerializable,
-    CoseError::{self, EncodeFailed, UnexpectedItem},
-    CoseKey, CoseSign1,
-};
+use super::entry::{check_sign1_chain, Payload, SubjectPublicKey};
+use anyhow::{bail, Context, Result};
+use coset::{cbor::value::Value::Array, AsCborValue, CoseKey};
 use std::fmt::{self, Display, Formatter};
 
 /// Represents a full Boot Certificate Chain (BCC). This consists of the root public key (which
@@ -27,23 +21,27 @@ impl Chain {
     /// extracted. This does not perform any semantic validation of the data in the
     /// certificates such as the Authority, Config and Code hashes.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
-        let raw = RawChain::from_slice(bytes).map_err(cose_error)?;
+        /*
+         * CDDL (from keymint/ProtectedData.aidl):
+         *
+         * Bcc = [
+         *     PubKeyEd25519 / PubKeyECDSA256, // DK_pub
+         *     + BccEntry,                     // Root -> leaf (KM_pub)
+         * ]
+         */
 
-        let root_public_key = SubjectPublicKey::from_cose_key(raw.public_key);
+        let value = ciborium::de::from_reader(bytes).context("Decoding CBOR BCC failed")?;
+        let array = match value {
+            Array(array) if array.len() >= 2 => array,
+            _ => bail!("Invalid BCC: {:?}", value),
+        };
+        let mut it = array.into_iter();
+
+        let root_public_key = CoseKey::from_cbor_value(it.next().unwrap()).map_err(cose_error)?;
+        let root_public_key = SubjectPublicKey::from_cose_key(root_public_key);
         root_public_key.check().context("Invalid root key")?;
 
-        let mut payloads = Vec::<Payload>::with_capacity(raw.entries.len());
-        let mut previous = payloads.last();
-        for (n, entry) in raw.entries.iter().enumerate() {
-            let payload = match previous {
-                None => Payload::check_sign1_signature(&root_public_key, entry),
-                Some(payload) => payload.check_sign1(entry),
-            }
-            .with_context(|| format!("Failed signature check of certificate at index {}", n))?;
-            payload.check().with_context(|| format!("Invalid BccPayload at index {}", n))?;
-            payloads.push(payload);
-            previous = payloads.last();
-        }
+        let payloads = check_sign1_chain(it, Some(&root_public_key))?;
 
         Ok(Self { root_public_key, payloads })
     }
@@ -60,41 +58,6 @@ impl Display for Chain {
         Ok(())
     }
 }
-
-// The COSE data parsed from a CBOR BCC.
-struct RawChain {
-    public_key: CoseKey,
-    entries: Vec<CoseSign1>,
-}
-
-impl AsCborValue for RawChain {
-    /*
-     * CDDL (from keymint/ProtectedData.aidl):
-     *
-     * Bcc = [
-     *     PubKeyEd25519 / PubKeyECDSA256, // DK_pub
-     *     + BccEntry,                     // Root -> leaf (KM_pub)
-     * ]
-     */
-
-    fn from_cbor_value(value: Value) -> Result<Self, CoseError> {
-        let a = match value {
-            Array(a) if a.len() >= 2 => a,
-            _ => return Err(UnexpectedItem("something", "an array with 2 or more items")),
-        };
-        let mut it = a.into_iter();
-        let public_key = CoseKey::from_cbor_value(it.next().unwrap())?;
-        let entries = it.map(CoseSign1::from_cbor_value).collect::<Result<Vec<_>, _>>()?;
-        Ok(Self { public_key, entries })
-    }
-
-    fn to_cbor_value(self) -> Result<Value, CoseError> {
-        // TODO: Implement when needed
-        Err(EncodeFailed)
-    }
-}
-
-impl CborSerializable for RawChain {}
 
 #[cfg(test)]
 mod tests {
