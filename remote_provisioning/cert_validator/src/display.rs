@@ -11,6 +11,12 @@ pub fn write_bytes_in_hex(f: &mut Formatter, bytes: &[u8]) -> Result<(), fmt::Er
     Ok(())
 }
 
+pub fn write_bytes_field(f: &mut Formatter, name: &str, value: &[u8]) -> Result<(), fmt::Error> {
+    write!(f, "{}: ", name)?;
+    write_bytes_in_hex(f, value)?;
+    writeln!(f)
+}
+
 pub fn write_value(f: &mut Formatter, value: &Value) -> Result<(), fmt::Error> {
     if let Some(bytes) = value.as_bytes() {
         write_bytes_in_hex(f, bytes)
