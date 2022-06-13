@@ -4,6 +4,7 @@ use super::field_value::FieldValue;
 use super::{cose_error, get_label_value};
 use crate::dice;
 use crate::display::{write_bytes_field, write_value};
+use crate::file_value;
 use crate::publickey::PublicKey;
 use crate::valueas::ValueAs;
 use anyhow::{anyhow, bail, ensure, Context, Result};
@@ -13,13 +14,12 @@ use coset::{iana, Algorithm, CborSerializable, CoseKey, CoseSign1, Header, Regis
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter};
-use std::io::Read;
 
 /// Parse a series of BccEntry certificates,represented as CBOR Values, checking the public key of
 /// any given cert's payload in the series correctly signs the next, and verifying the payloads
 /// are well formed. If root_key is specified then it must be the key used to sign the first (root)
 /// certificate; otherwise that signature is not checked.
-pub fn check_sign1_chain<T: IntoIterator<Item = Value>>(
+pub(super) fn check_sign1_chain<T: IntoIterator<Item = Value>>(
     chain: T,
     root_key: Option<&SubjectPublicKey>,
 ) -> Result<Vec<Payload>> {
@@ -47,47 +47,25 @@ pub fn check_sign1_chain<T: IntoIterator<Item = Value>>(
 /// Read a series of bcc file certificates and verify that the public key of
 /// any given cert's payload in the series correctly signs the next cose
 /// sign1 cert.
-pub fn check_sign1_cert_chain(certs: &[&str]) -> Result<()> {
-    ensure!(!certs.is_empty());
-    let mut payload = RawPayload::from_sign1(&read(certs[0])?)
-        .context("Failed to read the first bccEntry payload")?;
-    for item in certs.iter().skip(1) {
-        payload.check().context("Validation of BccPayload entries failed.")?;
-        payload =
-            payload.check_sign1(&read(item).context("Failed to read the bccEntry payload")?)?;
-    }
-    Ok(())
+pub fn check_sign1_cert_chain(certs: &[&str]) -> Result<Vec<Payload>> {
+    let root_key = None;
+    // certs.iter() gives us an iterator over &&str; we need to use copied() here to
+    // convert to an iterator over &str.
+    let chain = certs.iter().copied().map(file_value).collect::<Result<Vec<_>>>()?;
+    check_sign1_chain(chain, root_key)
 }
 
 /// Read a given cbor array containing bcc entries and verify that the public key
 /// of any given cert's payload in the series correctly signs the next cose sign1
 /// cert.
-pub fn check_sign1_chain_array(cbor_arr: &[Value]) -> Result<()> {
-    ensure!(!cbor_arr.is_empty());
-
-    let mut payload = RawPayload::from_sign1(
-        &CoseSign1::from_cbor_value(cbor_arr[0].clone()).map_err(cose_error)?,
-    )
-    .context("Failed to read bccEntry payload")?;
-    for item in cbor_arr.iter().skip(1) {
-        payload.check().context("Validation of BccPayload entries failed")?;
-        let next_sign1 = &CoseSign1::from_cbor_value(item.clone()).map_err(cose_error)?;
-        payload = payload.check_sign1(next_sign1).context("Failed to read bccEntry payload")?;
-    }
-    Ok(())
-}
-
-/// Read a file name as string and create the BccEntry as COSE_sign1 structure.
-pub fn read(fname: &str) -> Result<CoseSign1> {
-    let mut f = std::fs::File::open(fname)?;
-    let mut content = Vec::new();
-    f.read_to_end(&mut content)?;
-    CoseSign1::from_slice(&content).map_err(cose_error)
+pub fn check_sign1_chain_array(cbor_arr: &[Value]) -> Result<Vec<Payload>> {
+    let root_key = None;
+    check_sign1_chain(cbor_arr.iter().cloned(), root_key)
 }
 
 /// Validate the protected header of a bcc entry with respect to the provided
 /// alg (typically originating from the subject public key of the payload).
-pub fn check_protected_header(alg: &Option<Algorithm>, header: &Header) -> Result<()> {
+fn check_protected_header(alg: &Option<Algorithm>, header: &Header) -> Result<()> {
     ensure!(&header.alg == alg);
     ensure!(header
         .crit
@@ -272,104 +250,6 @@ impl Payload {
     }
 }
 
-/// Struct describing BccPayload cbor of the BccEntry.
-#[derive(Debug)]
-pub struct RawPayload(Value);
-impl RawPayload {
-    /// Construct the Payload from the parent BccEntry COSE_sign1 structure.
-    fn from_sign1(sign1: &CoseSign1) -> Result<RawPayload> {
-        let bytes = sign1.payload.as_ref().ok_or_else(|| anyhow!("no payload"))?;
-        Self::from_slice(bytes.as_slice())
-    }
-
-    /// Validate entries in the Payload to be correct.
-    pub(super) fn check(&self) -> Result<()> {
-        // Validate required fields.
-        self.map_lookup(dice::ISS)?.as_string()?;
-        self.map_lookup(dice::SUB)?.as_string()?;
-        SubjectPublicKey::from_payload(self)?.check().context("Public key failed checking")?;
-        self.map_lookup(dice::KEY_USAGE)?
-            .as_bytes()
-            .ok_or_else(|| anyhow!("Payload Key usage not bytes"))?;
-
-        // Validate required and optional fields. The required fields are those defined
-        // to be present for CDI_Certificates in the open-DICE profile.
-        // TODO: Check if the optional fields are present, and if so, ensure that
-        //       the operations applied to the mandatory fields actually reproduce the
-        //       values in the optional fields as specified in open-DICE.
-        self.0.map_lookup(dice::CODE_HASH).context("Code hash must be present.")?;
-        self.0.map_lookup(dice::CONFIG_DESC).context("Config descriptor must be present.")?;
-        self.0.map_lookup(dice::AUTHORITY_HASH).context("Authority hash must be present.")?;
-        self.0.map_lookup(dice::MODE).context("Mode must be present.")?;
-
-        // Verify that each key that does exist has the expected type.
-        self.0
-            .check_bytes_val_if_key_in_map(dice::CODE_HASH)
-            .context("Code Hash value not bytes.")?;
-        self.0
-            .check_bytes_val_if_key_in_map(dice::CODE_DESC)
-            .context("Code Descriptor value not bytes.")?;
-        self.0
-            .check_bytes_val_if_key_in_map(dice::CONFIG_HASH)
-            .context("Configuration Hash value not bytes.")?;
-        self.0
-            .check_bytes_val_if_key_in_map(dice::CONFIG_DESC)
-            .context("Configuration descriptor value not bytes.")?;
-        self.0
-            .check_bytes_val_if_key_in_map(dice::AUTHORITY_HASH)
-            .context("Authority Hash value not bytes.")?;
-        self.0
-            .check_bytes_val_if_key_in_map(dice::AUTHORITY_DESC)
-            .context("Authority descriptor value not bytes.")?;
-        self.0.check_bytes_val_if_key_in_map(dice::MODE).context("Mode value not bytes.")?;
-        Ok(())
-    }
-
-    /// Verify that the public key of this payload correctly signs the provided
-    /// BccEntry sign1 object.
-    pub(super) fn check_sign1(&self, sign1: &CoseSign1) -> Result<RawPayload> {
-        let pkey = SubjectPublicKey::from_payload(self)
-            .context("Failed to construct Public key from the Bcc payload.")?;
-        let new_payload = Self::check_sign1_signature(&pkey, sign1)?;
-        ensure!(
-            self.map_lookup(dice::SUB)? == new_payload.map_lookup(dice::ISS)?,
-            "Subject/Issuer mismatch"
-        );
-        Ok(new_payload)
-    }
-
-    pub(super) fn check_sign1_signature(
-        pkey: &SubjectPublicKey,
-        sign1: &CoseSign1,
-    ) -> Result<RawPayload> {
-        check_protected_header(&pkey.0.alg, &sign1.protected.header)
-            .context("Validation of bcc entry protected header failed.")?;
-        let v = PublicKey::from_cose_key(&pkey.0)
-            .context("Extracting the Public key from coseKey failed.")?;
-        sign1.verify_signature(b"", |s, m| v.verify(s, m, &pkey.0.alg)).with_context(|| {
-            format!("public key {} incorrectly signs the given cose_sign1 cert.", pkey)
-        })?;
-        let new_payload = RawPayload::from_sign1(sign1)
-            .context("Failed to extract bcc payload from cose_sign1")?;
-        Ok(new_payload)
-    }
-
-    fn from_slice(b: &[u8]) -> Result<Self> {
-        Ok(RawPayload(ciborium::de::from_reader(b).map_err(|e| anyhow!("CborError: {}", e))?))
-    }
-
-    fn map_lookup(&self, key: i64) -> Result<&Value> {
-        Ok(&self
-            .0
-            .as_map()
-            .ok_or_else(|| anyhow!("not a map"))?
-            .iter()
-            .find(|(k, _v)| k == &Value::from(key))
-            .ok_or_else(|| anyhow!("missing key {}", key))?
-            .1)
-    }
-}
-
 /// Struct wrapping the CoseKey for BccEntry.BccPayload.SubjectPublicKey
 /// and the methods used for its validation.
 pub struct SubjectPublicKey(CoseKey);
@@ -384,15 +264,6 @@ impl Display for SubjectPublicKey {
 impl SubjectPublicKey {
     pub(super) fn from_cose_key(cose_key: CoseKey) -> Self {
         Self(cose_key)
-    }
-
-    /// Construct the SubjectPublicKey from the (bccEntry's) Payload.
-    pub fn from_payload(payload: &RawPayload) -> Result<SubjectPublicKey> {
-        let bytes = payload
-            .map_lookup(dice::SUBJECT_PUBLIC_KEY)?
-            .as_bytes()
-            .ok_or_else(|| anyhow!("public key not bytes"))?;
-        Self::from_slice(bytes)
     }
 
     fn from_slice(bytes: &[u8]) -> Result<SubjectPublicKey> {
@@ -508,57 +379,32 @@ mod tests {
     use coset::{iana, Header, Label, RegisteredLabel};
 
     #[test]
-    fn test_bcc_payload_check() {
-        let payload = RawPayload::from_sign1(
-            &read("testdata/open-dice/_CBOR_Ed25519_cert_full_cert_chain_0.cert").unwrap(),
-        );
-        assert!(payload.is_ok());
-
-        let payload = payload.unwrap();
-        assert!(payload.check().is_ok());
-    }
-
-    #[test]
-    fn test_bcc_payload_check_sign1() {
-        let payload = RawPayload::from_sign1(
-            &read("testdata/open-dice/_CBOR_Ed25519_cert_full_cert_chain_0.cert").unwrap(),
-        );
-        assert!(payload.is_ok(), "Payload not okay: {:?}", payload);
-        let payload = payload.unwrap().check_sign1(
-            &read("testdata/open-dice/_CBOR_Ed25519_cert_full_cert_chain_1.cert").unwrap(),
-        );
-        assert!(payload.is_ok(), "Payload not okay: {:?}", payload);
-        let payload = payload.unwrap().check_sign1(
-            &read("testdata/open-dice/_CBOR_Ed25519_cert_full_cert_chain_2.cert").unwrap(),
-        );
-        assert!(payload.is_ok(), "Payload not okay: {:?}", payload);
-    }
-
-    #[test]
-    fn test_check_sign1_cert_chain() {
+    fn test_check_sign1_cert_chain() -> Result<()> {
         let arr: Vec<&str> = vec![
-            "testdata/open-dice/_CBOR_Ed25519_cert_full_cert_chain_0.cert",
-            "testdata/open-dice/_CBOR_Ed25519_cert_full_cert_chain_1.cert",
-            "testdata/open-dice/_CBOR_Ed25519_cert_full_cert_chain_2.cert",
+            "testdata/bcc/_CBOR_Ed25519_cert_full_cert_chain_0.cert",
+            "testdata/bcc/_CBOR_Ed25519_cert_full_cert_chain_1.cert",
+            "testdata/bcc/_CBOR_Ed25519_cert_full_cert_chain_2.cert",
         ];
-        assert!(check_sign1_cert_chain(&arr).is_ok());
+        check_sign1_cert_chain(&arr)?;
+        Ok(())
     }
 
     #[test]
     fn test_check_sign1_cert_chain_invalid() {
         let arr: Vec<&str> = vec![
-            "testdata/open-dice/_CBOR_Ed25519_cert_full_cert_chain_0.cert",
-            "testdata/open-dice/_CBOR_Ed25519_cert_full_cert_chain_2.cert",
+            "testdata/bcc/_CBOR_Ed25519_cert_full_cert_chain_0.cert",
+            "testdata/bcc/_CBOR_Ed25519_cert_full_cert_chain_2.cert",
         ];
         assert!(check_sign1_cert_chain(&arr).is_err());
     }
 
     #[test]
-    fn test_check_sign1_chain_array() {
-        let cbor_file = &file_value("testdata/open-dice/_CBOR_bcc_entry_cert_array.cert").unwrap();
-        let cbor_arr = ValueAs::as_array(cbor_file).unwrap();
+    fn test_check_sign1_chain_array() -> Result<()> {
+        let cbor_file = file_value("testdata/bcc/_CBOR_bcc_entry_cert_array.cert")?;
+        let cbor_arr = ValueAs::as_array(&cbor_file)?;
         assert_eq!(cbor_arr.len(), 3);
-        assert!(check_sign1_chain_array(cbor_arr).is_ok());
+        check_sign1_chain_array(cbor_arr)?;
+        Ok(())
     }
 
     #[test]
