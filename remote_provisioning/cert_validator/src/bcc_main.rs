@@ -34,7 +34,8 @@ fn main() -> Result<()> {
         ("verify-certs", Some(sub_args)) => {
             if let Some(certs) = sub_args.values_of("certs") {
                 let certs: Vec<_> = certs.collect();
-                return bcc::entry::check_sign1_cert_chain(&certs);
+                bcc::entry::check_sign1_cert_chain(&certs)?;
+                return Ok(());
             }
         }
         _ => {}
