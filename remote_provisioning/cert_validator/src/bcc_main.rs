@@ -17,6 +17,7 @@ fn main() -> Result<()> {
         )
         .subcommand(
             SubCommand::with_name("verify-certs")
+                .arg(Arg::with_name("dump").long("dump"))
                 .arg(Arg::with_name("certs").multiple(true).min_values(1)),
         );
 
@@ -34,7 +35,13 @@ fn main() -> Result<()> {
         ("verify-certs", Some(sub_args)) => {
             if let Some(certs) = sub_args.values_of("certs") {
                 let certs: Vec<_> = certs.collect();
-                bcc::entry::check_sign1_cert_chain(&certs)?;
+                let payloads = bcc::entry::check_sign1_cert_chain(&certs)?;
+                if sub_args.is_present("dump") {
+                    for (i, payload) in payloads.iter().enumerate() {
+                        println!("Cert {}:", i);
+                        println!("{}", payload);
+                    }
+                }
                 return Ok(());
             }
         }

@@ -4,9 +4,9 @@ use super::field_value::FieldValue;
 use super::{cose_error, get_label_value};
 use crate::dice;
 use crate::display::{write_bytes_field, write_value};
-use crate::file_value;
 use crate::publickey::PublicKey;
 use crate::valueas::ValueAs;
+use crate::{value_from_bytes, value_from_file};
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use ciborium::value::Value;
 use coset::AsCborValue;
@@ -19,7 +19,7 @@ use std::fmt::{self, Display, Formatter};
 /// any given cert's payload in the series correctly signs the next, and verifying the payloads
 /// are well formed. If root_key is specified then it must be the key used to sign the first (root)
 /// certificate; otherwise that signature is not checked.
-pub(super) fn check_sign1_chain<T: IntoIterator<Item = Value>>(
+pub fn check_sign1_chain<T: IntoIterator<Item = Value>>(
     chain: T,
     root_key: Option<&SubjectPublicKey>,
 ) -> Result<Vec<Payload>> {
@@ -51,16 +51,8 @@ pub fn check_sign1_cert_chain(certs: &[&str]) -> Result<Vec<Payload>> {
     let root_key = None;
     // certs.iter() gives us an iterator over &&str; we need to use copied() here to
     // convert to an iterator over &str.
-    let chain = certs.iter().copied().map(file_value).collect::<Result<Vec<_>>>()?;
+    let chain = certs.iter().copied().map(value_from_file).collect::<Result<Vec<_>>>()?;
     check_sign1_chain(chain, root_key)
-}
-
-/// Read a given cbor array containing bcc entries and verify that the public key
-/// of any given cert's payload in the series correctly signs the next cose sign1
-/// cert.
-pub fn check_sign1_chain_array(cbor_arr: &[Value]) -> Result<Vec<Payload>> {
-    let root_key = None;
-    check_sign1_chain(cbor_arr.iter().cloned(), root_key)
 }
 
 /// Validate the protected header of a bcc entry with respect to the provided
@@ -363,7 +355,7 @@ impl ConfigDesc {
 }
 
 fn cbor_map_from_slice(bytes: &[u8]) -> Result<Vec<(Value, Value)>> {
-    let value = ciborium::de::from_reader(bytes).context("Decoding CBOR map failed")?;
+    let value = value_from_bytes(bytes)?;
     let entries = match value {
         Value::Map(entries) => entries,
         _ => bail!("Not a map: {:?}", value),
@@ -374,8 +366,7 @@ fn cbor_map_from_slice(bytes: &[u8]) -> Result<Vec<(Value, Value)>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::file_value;
-    use crate::valueas::ValueAs;
+    use crate::value_from_file;
     use coset::{iana, Header, Label, RegisteredLabel};
 
     #[test]
@@ -400,10 +391,14 @@ mod tests {
 
     #[test]
     fn test_check_sign1_chain_array() -> Result<()> {
-        let cbor_file = file_value("testdata/bcc/_CBOR_bcc_entry_cert_array.cert")?;
-        let cbor_arr = ValueAs::as_array(&cbor_file)?;
+        let cbor_file = value_from_file("testdata/bcc/_CBOR_bcc_entry_cert_array.cert")?;
+        let cbor_arr = match cbor_file {
+            Value::Array(a) => a,
+            _ => bail!("Not an array"),
+        };
         assert_eq!(cbor_arr.len(), 3);
-        check_sign1_chain_array(cbor_arr)?;
+        let root_key = None;
+        check_sign1_chain(cbor_arr, root_key)?;
         Ok(())
     }
 
