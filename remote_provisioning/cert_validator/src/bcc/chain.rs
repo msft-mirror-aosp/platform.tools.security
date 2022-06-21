@@ -2,6 +2,7 @@
 
 use super::cose_error;
 use super::entry::{check_sign1_chain, Payload, SubjectPublicKey};
+use crate::value_from_bytes;
 use anyhow::{bail, Context, Result};
 use coset::{cbor::value::Value::Array, AsCborValue, CoseKey};
 use std::fmt::{self, Display, Formatter};
@@ -30,7 +31,7 @@ impl Chain {
          * ]
          */
 
-        let value = ciborium::de::from_reader(bytes).context("Decoding CBOR BCC failed")?;
+        let value = value_from_bytes(bytes)?;
         let array = match value {
             Array(array) if array.len() >= 2 => array,
             _ => bail!("Invalid BCC: {:?}", value),
