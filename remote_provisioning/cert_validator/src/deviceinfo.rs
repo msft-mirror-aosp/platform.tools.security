@@ -74,3 +74,17 @@ pub fn check(deviceinfo: &[Value]) -> Result<()> {
     unverified_info.check_string_val_if_key_in_map(String::from("fingerprint"))?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::value_from_file;
+
+    #[test]
+    fn deviceinfo_validation() -> Result<()> {
+        let val = &value_from_file("testdata/device-info/_CBOR_device_info_0.cert").unwrap();
+        let deviceinfo = extract(val)?;
+        check(deviceinfo)?;
+        Ok(())
+    }
+}
