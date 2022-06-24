@@ -11,6 +11,7 @@ pub mod valueas;
 
 use anyhow::{bail, Context, Result};
 use ciborium::{de::from_reader, value::Value};
+use std::io::Read;
 
 /// Reads the provided binary cbor-encoded file and returns a
 /// ciborium::Value struct wrapped in Result.
@@ -21,32 +22,13 @@ pub fn value_from_file(fname: &str) -> Result<Value> {
 
 /// Decodes the provided binary CBOR-encoded value and returns a
 /// ciborium::Value struct wrapped in Result.
-pub fn value_from_bytes(bytes: &[u8]) -> Result<Value> {
-    let mut reader = CheckingReader(bytes);
-    let value = from_reader(&mut reader).context("Decoding CBOR failed")?;
-    reader.check_no_trailing_data()?;
+pub fn value_from_bytes(mut bytes: &[u8]) -> Result<Value> {
+    let value = from_reader(bytes.by_ref()).context("Decoding CBOR failed")?;
+    // Ciborium tries to read one Value, but doesn't care if there is trailing data. We do.
+    if !bytes.is_empty() {
+        bail!("Unexpected trailing data");
+    }
     Ok(value)
-}
-
-/// Wrapper around a slice allowing us to keep ownership (so we can check it has all been
-/// consumed) while still implementing the ciborium Read trait.
-struct CheckingReader<'a>(&'a [u8]);
-
-impl ciborium_io::Read for &mut CheckingReader<'_> {
-    type Error = std::io::Error;
-
-    fn read_exact(&mut self, data: &mut [u8]) -> Result<(), Self::Error> {
-        self.0.read_exact(data)
-    }
-}
-
-impl CheckingReader<'_> {
-    fn check_no_trailing_data(&self) -> Result<()> {
-        if !self.0.is_empty() {
-            bail!("Unexpected trailing data");
-        }
-        Ok(())
-    }
 }
 
 #[cfg(test)]
