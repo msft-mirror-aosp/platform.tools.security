@@ -1,93 +1,12 @@
 //! This module provides functions for validating chains of bcc certificates
 
+mod chain;
 pub mod entry;
+mod field_value;
 
-use self::entry::SubjectPublicKey;
-use anyhow::{anyhow, Context, Result};
-use coset::AsCborValue;
-use coset::{
-    cbor::value::Value::{self, Array},
-    CborSerializable,
-    CoseError::{self, EncodeFailed, UnexpectedItem},
-    CoseKey, CoseSign1,
-};
-use std::io::Read;
-
-/// Represents a full Boot Certificate Chain (BCC). This consists of the root public key (which
-/// signs the first certificate), followed by a chain of BccEntry certificates. Apart from the
-/// first, the issuer of each cert if the subject of the previous one.
-pub struct Chain {
-    public_key: CoseKey,
-    entries: Vec<CoseSign1>,
-}
-
-impl Chain {
-    /// Read a Chain from a file containing the CBOR encoding. This fails if the representation is
-    /// ill-formed.
-    pub fn read(fname: &str) -> Result<Chain> {
-        let mut f = std::fs::File::open(fname)?;
-        let mut content = Vec::new();
-        f.read_to_end(&mut content)?;
-        Chain::from_slice(&content).map_err(cose_error)
-    }
-
-    /// Check all certificates are correctly signed, contain the required fields, and are otherwise
-    /// semantically correct.
-    pub fn check(&self) -> Result<Vec<entry::Payload>> {
-        let public_key = SubjectPublicKey::from_cose_key(self.public_key.clone());
-        public_key.check().context("Invalid root key")?;
-
-        let mut it = self.entries.iter();
-        let entry = it.next().unwrap();
-        let mut payload = entry::Payload::check_sign1_signature(&public_key, entry)
-            .context("Failed initial signature check.")?;
-        let mut payloads = Vec::with_capacity(self.entries.len());
-
-        for entry in it {
-            payload.check().context("Invalid BccPayload")?;
-            let next_payload = payload.check_sign1(entry)?;
-            payloads.push(payload);
-            payload = next_payload;
-        }
-        payloads.push(payload);
-        Ok(payloads)
-    }
-
-    /// Return the public key that can be used to verify the signature on the first certificate in
-    /// the chain.
-    pub fn get_root_public_key(&self) -> SubjectPublicKey {
-        SubjectPublicKey::from_cose_key(self.public_key.clone())
-    }
-}
-
-impl AsCborValue for Chain {
-    /*
-     * CDDL (from keymint/ProtectedData.aidl):
-     *
-     * Bcc = [
-     *     PubKeyEd25519 / PubKeyECDSA256, // DK_pub
-     *     + BccEntry,                     // Root -> leaf (KM_pub)
-     * ]
-     */
-
-    fn from_cbor_value(value: Value) -> Result<Self, CoseError> {
-        let a = match value {
-            Array(a) if a.len() >= 2 => a,
-            _ => return Err(UnexpectedItem("something", "an array with 2 or more items")),
-        };
-        let mut it = a.into_iter();
-        let public_key = CoseKey::from_cbor_value(it.next().unwrap())?;
-        let entries = it.map(CoseSign1::from_cbor_value).collect::<Result<Vec<_>, _>>()?;
-        Ok(Chain { public_key, entries })
-    }
-
-    fn to_cbor_value(self) -> Result<Value, CoseError> {
-        // TODO: Implement when needed
-        Err(EncodeFailed)
-    }
-}
-
-impl CborSerializable for Chain {}
+use anyhow::{anyhow, Result};
+pub use chain::Chain;
+use coset::cbor::value::Value;
 
 fn cose_error(ce: coset::CoseError) -> anyhow::Error {
     anyhow!("CoseError: {:?}", ce)
