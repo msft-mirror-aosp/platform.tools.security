@@ -5,7 +5,7 @@
 use crate::bcc::get_label_value_as_bytes;
 use crate::display::write_bytes_in_hex;
 use anyhow::{bail, ensure, Context, Result};
-use coset::{iana, Algorithm, CoseKey};
+use coset::{iana, CoseKey};
 use openssl::bn::{BigNum, BigNumContext};
 use openssl::ec::{EcGroup, EcKey, EcPoint};
 use openssl::ecdsa::EcdsaSig;
@@ -125,31 +125,14 @@ impl PublicKey {
 
     /// Verify that the signature obtained from signing the given message
     /// with the PublicKey matches the signature provided.
-    pub fn verify(&self, signature: &[u8], message: &[u8], alg: &Option<Algorithm>) -> Result<()> {
-        match &self.key {
-            PubKey::Ed25519 { pub_key } => {
-                ensure!(
-                    *alg == Some(coset::Algorithm::Assigned(iana::Algorithm::EdDSA)),
-                    "Unexpected algorithm. Ed25519 key, but alg is: {:?}",
-                    *alg
-                );
-                ensure!(
-                    Self::verify_ed25519(pub_key, signature, message)?,
-                    "Signature verification failed."
-                );
-            }
+    pub fn verify(&self, signature: &[u8], message: &[u8]) -> Result<()> {
+        let verified = match &self.key {
+            PubKey::Ed25519 { pub_key } => Self::verify_ed25519(pub_key, signature, message)?,
             PubKey::P256 { x_coord, y_coord } => {
-                ensure!(
-                    *alg == Some(coset::Algorithm::Assigned(iana::Algorithm::ES256)),
-                    "Unexpected algorithm. P256 key, but alg is: {:?}",
-                    *alg
-                );
-                ensure!(
-                    Self::verify_p256(x_coord, y_coord, signature, message)?,
-                    "Signature verification failed."
-                );
+                Self::verify_p256(x_coord, y_coord, signature, message)?
             }
-        }
+        };
+        ensure!(verified, "Signature verification failed.");
         Ok(())
     }
 }
