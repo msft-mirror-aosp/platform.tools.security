@@ -2,10 +2,11 @@
 //! used in the BccPayload. The key itself is stored as a simple byte array in
 //! a vector.
 
-use crate::bcc::get_label_value_as_bytes;
+use crate::bcc::{get_label_value, get_label_value_as_bytes};
 use crate::display::write_bytes_in_hex;
 use anyhow::{bail, ensure, Context, Result};
-use coset::{iana, CoseKey};
+use coset::cbor::value::Value;
+use coset::{iana, Algorithm, CoseKey};
 use openssl::bn::{BigNum, BigNumContext};
 use openssl::ec::{EcGroup, EcKey, EcPoint};
 use openssl::ecdsa::EcdsaSig;
@@ -36,10 +37,18 @@ pub struct PublicKey {
 impl PublicKey {
     /// Extract the PublicKey from Subject Public Key.
     /// (CertificateRequest.BccEntry.payload[SubjectPublicKey].X)
-    pub fn from_cose_key(pkey: &CoseKey) -> Result<Self> {
+    pub(super) fn from_cose_key(pkey: &CoseKey) -> Result<Self> {
+        if !pkey.key_ops.is_empty() {
+            ensure!(pkey
+                .key_ops
+                .contains(&coset::KeyOperation::Assigned(iana::KeyOperation::Verify)));
+        }
         let x = get_label_value_as_bytes(pkey, iana::OkpKeyParameter::X as i64)?;
-        match pkey.alg {
-            Some(coset::Algorithm::Assigned(iana::Algorithm::EdDSA)) => {
+        match pkey.kty {
+            coset::KeyType::Assigned(iana::KeyType::OKP) => {
+                ensure!(pkey.alg == Some(coset::Algorithm::Assigned(iana::Algorithm::EdDSA)));
+                let crv = get_label_value(pkey, iana::OkpKeyParameter::Crv as i64)?;
+                ensure!(crv == &Value::from(iana::EllipticCurve::Ed25519 as i64));
                 PublicKey::new(PubKey::Ed25519 {
                     pub_key: x.as_slice().try_into().context(format!(
                         "Failed to convert x_coord to array. Len: {:?}",
@@ -47,7 +56,10 @@ impl PublicKey {
                     ))?,
                 })
             }
-            Some(coset::Algorithm::Assigned(iana::Algorithm::ES256)) => {
+            coset::KeyType::Assigned(iana::KeyType::EC2) => {
+                ensure!(pkey.alg == Some(coset::Algorithm::Assigned(iana::Algorithm::ES256)));
+                let crv = get_label_value(pkey, iana::Ec2KeyParameter::Crv as i64)?;
+                ensure!(crv == &Value::from(iana::EllipticCurve::P_256 as i64));
                 let y = get_label_value_as_bytes(pkey, iana::Ec2KeyParameter::Y as i64)?;
                 PublicKey::new(PubKey::P256 {
                     x_coord: x.as_slice().try_into().context(format!(
@@ -60,12 +72,19 @@ impl PublicKey {
                     ))?,
                 })
             }
-            _ => bail!("Unsupported signature algorithm: {:?}", pkey.alg),
+            _ => bail!("Unexpected KeyType value: {:?}", pkey.kty),
         }
     }
 
     fn new(key: PubKey) -> Result<Self> {
         Ok(Self { key })
+    }
+
+    pub(super) fn algorithm(&self) -> Algorithm {
+        match &self.key {
+            PubKey::Ed25519 { .. } => Algorithm::Assigned(iana::Algorithm::EdDSA),
+            PubKey::P256 { .. } => Algorithm::Assigned(iana::Algorithm::ES256),
+        }
     }
 
     fn verify_ed25519(
