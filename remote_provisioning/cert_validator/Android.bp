@@ -2,33 +2,6 @@ package {
     default_applicable_licenses: ["Android-Apache-2.0"],
 }
 
-rust_bindgen {
-    name: "libssl_bindgen",
-    crate_name: "ssl_bindgen",
-    wrapper_src: "libssl_wrapper.h",
-    source_stem: "bindings",
-    bindgen_flags: [
-        "--size_t-is-usize",
-        "--allowlist-function", "BN_bin2bn",
-        "--allowlist-function", "ECDSA_SIG_free",
-        "--allowlist-function", "ECDSA_SIG_new",
-        "--allowlist-function", "ECDSA_SIG_to_bytes",
-        "--allowlist-function", "ECDSA_verify",
-        "--allowlist-function", "EC_KEY_new_by_curve_name",
-        "--allowlist-function", "EC_KEY_free",
-        "--allowlist-function", "o2i_ECPublicKey",
-        "--allowlist-function", "ED25519_verify",
-        "--allowlist-function", "OPENSSL_free",
-        "--allowlist-function", "SHA256",
-        "--allowlist-var", "ED25519_PUBLIC_KEY_LEN",
-        "--allowlist-var", "ED25519_SIGNATURE_LEN",
-        "--allowlist-var", "NID_X9_62_prime256v1",
-    ],
-    cflags: ["-I/usr/include/android"],
-    shared_libs: ["libcrypto"],
-    host_supported: true,
-}
-
 rust_defaults {
     name: "cert_request_validator_defaults",
     host_supported: true,
@@ -39,7 +12,7 @@ rust_defaults {
         "libciborium_io",
         "libcoset",
         "libchrono",
-        "libssl_bindgen",
+        "libopenssl",
     ],
 }
 

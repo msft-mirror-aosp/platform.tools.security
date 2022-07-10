@@ -153,7 +153,7 @@ impl Payload {
                 .context("Validation of bcc entry protected header failed.")?;
             let v = PublicKey::from_cose_key(&pkey.0)
                 .context("Extracting the Public key from coseKey failed.")?;
-            sign1.verify_signature(b"", |s, m| v.verify(s, m, &pkey.0.alg)).with_context(|| {
+            sign1.verify_signature(b"", |s, m| v.verify(s, m)).with_context(|| {
                 format!("public key {} incorrectly signs the given cose_sign1 cert.", pkey)
             })?;
         }
