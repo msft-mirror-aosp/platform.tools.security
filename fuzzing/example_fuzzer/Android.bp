@@ -19,7 +19,15 @@ cc_fuzz {
     corpus: ["corpus/*"],
     dictionary: "example_fuzzer.dict",
     fuzz_config: {
+        description: "Test Fuzzer",
+        remotely_accessible: false,
+        host_only: false,
+        untrusted_data: false,
+        privilege_level: "Other",
+        isolated: false,
+        production_date: "6/8/2019",
+        critical: false,
         fuzz_on_haiku_device: false,
-        fuzz_on_haiku_host: false,
+        fuzz_on_haiku_host: true,
     },
 }
