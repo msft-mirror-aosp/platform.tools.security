@@ -1,7 +1,7 @@
 //! This module wraps the certificate validation functions intended for BccEntry.
 
+use super::cose_error;
 use super::field_value::FieldValue;
-use super::{cose_error, get_label_value};
 use crate::dice;
 use crate::display::{write_bytes_field, write_value};
 use crate::publickey::PublicKey;
@@ -21,7 +21,7 @@ use std::fmt::{self, Display, Formatter};
 /// certificate; otherwise that signature is not checked.
 pub fn check_sign1_chain<T: IntoIterator<Item = Value>>(
     chain: T,
-    root_key: Option<&SubjectPublicKey>,
+    root_key: Option<&PublicKey>,
 ) -> Result<Vec<Payload>> {
     let values = chain.into_iter();
     let mut payloads = Vec::<Payload>::with_capacity(values.size_hint().0);
@@ -57,8 +57,8 @@ pub fn check_sign1_cert_chain(certs: &[&str]) -> Result<Vec<Payload>> {
 
 /// Validate the protected header of a bcc entry with respect to the provided
 /// alg (typically originating from the subject public key of the payload).
-fn check_protected_header(alg: &Option<Algorithm>, header: &Header) -> Result<()> {
-    ensure!(&header.alg == alg);
+fn check_protected_header(alg: &Algorithm, header: &Header) -> Result<()> {
+    ensure!(header.alg.as_ref() == Some(alg));
     ensure!(header
         .crit
         .iter()
@@ -100,7 +100,7 @@ impl From<u8> for DiceMode {
 pub struct Payload {
     pub issuer: String,
     pub subject: String,
-    pub subject_public_key: SubjectPublicKey,
+    pub subject_public_key: PublicKey,
     pub mode: DiceMode,
     pub code_desc: Option<Vec<u8>>,
     pub code_hash: Vec<u8>,
@@ -134,7 +134,7 @@ impl Display for Payload {
 
 impl Payload {
     fn from_cbor_sign1(
-        public_key: Option<&SubjectPublicKey>,
+        public_key: Option<&PublicKey>,
         expected_issuer: Option<&str>,
         cbor: Value,
     ) -> Result<Self> {
@@ -144,16 +144,14 @@ impl Payload {
     }
 
     pub(super) fn from_sign1(
-        pkey: Option<&SubjectPublicKey>,
+        pkey: Option<&PublicKey>,
         expected_issuer: Option<&str>,
         sign1: &CoseSign1,
     ) -> Result<Self> {
         if let Some(pkey) = pkey {
-            check_protected_header(&pkey.0.alg, &sign1.protected.header)
+            check_protected_header(&pkey.algorithm(), &sign1.protected.header)
                 .context("Validation of bcc entry protected header failed.")?;
-            let v = PublicKey::from_cose_key(&pkey.0)
-                .context("Extracting the Public key from coseKey failed.")?;
-            sign1.verify_signature(b"", |s, m| v.verify(s, m)).with_context(|| {
+            sign1.verify_signature(b"", |s, m| pkey.verify(s, m)).with_context(|| {
                 format!("public key {} incorrectly signs the given cose_sign1 cert.", pkey)
             })?;
         }
@@ -215,7 +213,8 @@ impl Payload {
         let authority_hash = authority_hash.into_bytes()?;
         let key_usage = key_usage.into_bytes()?;
 
-        let subject_public_key = SubjectPublicKey::from_slice(&subject_public_key)?;
+        let subject_public_key = CoseKey::from_slice(&subject_public_key).map_err(cose_error)?;
+        let subject_public_key = PublicKey::from_cose_key(&subject_public_key)?;
         if mode.len() != 1 {
             bail!("mode must be a single byte")
         };
@@ -239,51 +238,6 @@ impl Payload {
             authority_desc,
             authority_hash,
         })
-    }
-}
-
-/// Struct wrapping the CoseKey for BccEntry.BccPayload.SubjectPublicKey
-/// and the methods used for its validation.
-pub struct SubjectPublicKey(CoseKey);
-
-impl Display for SubjectPublicKey {
-    fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
-        let pkey = PublicKey::from_cose_key(&self.0).map_err(|_| fmt::Error)?;
-        pkey.fmt(f)
-    }
-}
-
-impl SubjectPublicKey {
-    pub(super) fn from_cose_key(cose_key: CoseKey) -> Self {
-        Self(cose_key)
-    }
-
-    fn from_slice(bytes: &[u8]) -> Result<SubjectPublicKey> {
-        Ok(SubjectPublicKey(CoseKey::from_slice(bytes).map_err(cose_error)?))
-    }
-
-    /// Perform validation on the items in the public key.
-    pub fn check(&self) -> Result<()> {
-        let pkey = &self.0;
-        if !pkey.key_ops.is_empty() {
-            ensure!(pkey
-                .key_ops
-                .contains(&coset::KeyOperation::Assigned(iana::KeyOperation::Verify)));
-        }
-        match pkey.kty {
-            coset::KeyType::Assigned(iana::KeyType::OKP) => {
-                ensure!(pkey.alg == Some(coset::Algorithm::Assigned(iana::Algorithm::EdDSA)));
-                let crv = get_label_value(pkey, iana::OkpKeyParameter::Crv as i64)?;
-                ensure!(crv == &Value::from(iana::EllipticCurve::Ed25519 as i64));
-            }
-            coset::KeyType::Assigned(iana::KeyType::EC2) => {
-                ensure!(pkey.alg == Some(coset::Algorithm::Assigned(iana::Algorithm::ES256)));
-                let crv = get_label_value(pkey, iana::Ec2KeyParameter::Crv as i64)?;
-                ensure!(crv == &Value::from(iana::EllipticCurve::P_256 as i64));
-            }
-            _ => bail!("Unexpected KeyType value: {:?}", pkey.kty),
-        }
-        Ok(())
     }
 }
 
@@ -404,18 +358,18 @@ mod tests {
 
     #[test]
     fn test_check_bcc_entry_protected_header() -> Result<()> {
-        let eddsa = Some(coset::Algorithm::Assigned(iana::Algorithm::EdDSA));
-        let header = Header { alg: (&eddsa).clone(), ..Default::default() };
+        let eddsa = coset::Algorithm::Assigned(iana::Algorithm::EdDSA);
+        let header = Header { alg: Some(eddsa.clone()), ..Default::default() };
         check_protected_header(&eddsa, &header).context("Only alg allowed")?;
         let header = Header { alg: Some(coset::Algorithm::PrivateUse(1000)), ..Default::default() };
         assert!(check_protected_header(&eddsa, &header).is_err());
-        let mut header = Header { alg: (&eddsa).clone(), ..Default::default() };
+        let mut header = Header { alg: Some(eddsa.clone()), ..Default::default() };
         header.rest.push((Label::Int(1000), Value::from(2000u16)));
         check_protected_header(&eddsa, &header).context("non-crit header allowed")?;
-        let mut header = Header { alg: (&eddsa).clone(), ..Default::default() };
+        let mut header = Header { alg: Some(eddsa.clone()), ..Default::default() };
         header.crit.push(RegisteredLabel::Assigned(iana::HeaderParameter::Alg));
         check_protected_header(&eddsa, &header).context("OK to say alg is critical")?;
-        let mut header = Header { alg: (&eddsa).clone(), ..Default::default() };
+        let mut header = Header { alg: Some(eddsa.clone()), ..Default::default() };
         header.crit.push(RegisteredLabel::Assigned(iana::HeaderParameter::CounterSignature));
         assert!(check_protected_header(&eddsa, &header).is_err());
         Ok(())
