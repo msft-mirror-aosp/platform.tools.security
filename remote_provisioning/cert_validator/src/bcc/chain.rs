@@ -47,6 +47,22 @@ impl Chain {
 
         Ok(Self { root_public_key, payloads })
     }
+
+    /// Get the root public key which verifies the first certificate in the chain.
+    pub fn root_public_key(&self) -> &PublicKey {
+        &self.root_public_key
+    }
+
+    /// Get the payloads of the certificates in the chain, from root to leaf.
+    pub fn payloads(&self) -> &[Payload] {
+        &self.payloads
+    }
+
+    /// Get the payload from the final certificate in the chain.
+    pub fn leaf(&self) -> &Payload {
+        // There is always at least one payload.
+        self.payloads.last().unwrap()
+    }
 }
 
 impl Display for Chain {
@@ -70,7 +86,7 @@ mod tests {
     fn test_check_chain_valid() -> Result<()> {
         let chain = fs::read("testdata/bcc/valid.chain").unwrap();
         let chain = Chain::from_bytes(&chain)?;
-        assert_eq!(chain.payloads.len(), 8);
+        assert_eq!(chain.payloads().len(), 8);
         Ok(())
     }
 
@@ -78,7 +94,7 @@ mod tests {
     fn test_check_chain_valid_p256() -> Result<()> {
         let chain = fs::read("testdata/bcc/valid_p256.chain").unwrap();
         let chain = Chain::from_bytes(&chain)?;
-        assert_eq!(chain.payloads.len(), 3);
+        assert_eq!(chain.payloads().len(), 3);
         Ok(())
     }
 
