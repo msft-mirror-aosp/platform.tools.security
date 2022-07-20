@@ -21,6 +21,11 @@ rust_library {
     defaults: ["cert_request_validator_defaults"],
     crate_name: "cert_request_validator",
     srcs: ["src/lib.rs"],
+    apex_available: [
+        "//apex_available:platform",
+        "com.android.compos",
+        "com.android.virt",
+    ],
 }
 
 filegroup(
