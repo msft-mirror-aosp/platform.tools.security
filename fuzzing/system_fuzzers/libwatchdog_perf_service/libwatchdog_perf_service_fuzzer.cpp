@@ -19,7 +19,7 @@
 
 #include <iostream>
 
-#include "IoPerfCollection.h"
+#include "PerformanceProfiler.h"
 #include "ProcStatCollector.h"
 #include "UidIoStatsCollector.h"
 
