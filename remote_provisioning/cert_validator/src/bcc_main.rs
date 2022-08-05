@@ -9,7 +9,7 @@ use clap::{Arg, SubCommand};
 use std::fs;
 
 fn main() -> Result<()> {
-    let app = clap::App::new("bcc_validator")
+    let mut app = clap::Command::new("bcc_validator")
         .subcommand(
             SubCommand::with_name("verify-chain")
                 .arg(Arg::with_name("dump").long("dump"))
@@ -21,9 +21,11 @@ fn main() -> Result<()> {
                 .arg(Arg::with_name("certs").multiple(true).min_values(1)),
         );
 
+    let usage = app.render_usage();
+
     let args = app.get_matches();
     match args.subcommand() {
-        ("verify-chain", Some(sub_args)) => {
+        Some(("verify-chain", sub_args)) => {
             if let Some(chain) = sub_args.value_of("chain") {
                 let chain = bcc::Chain::from_bytes(&fs::read(chain)?)?;
                 if sub_args.is_present("dump") {
@@ -32,7 +34,7 @@ fn main() -> Result<()> {
                 return Ok(());
             }
         }
-        ("verify-certs", Some(sub_args)) => {
+        Some(("verify-certs", sub_args)) => {
             if let Some(certs) = sub_args.values_of("certs") {
                 let certs: Vec<_> = certs.collect();
                 let payloads = bcc::entry::check_sign1_cert_chain(&certs)?;
@@ -47,6 +49,6 @@ fn main() -> Result<()> {
         }
         _ => {}
     }
-    eprintln!("{}", args.usage());
+    eprintln!("{}", usage);
     bail!("Invalid arguments");
 }
