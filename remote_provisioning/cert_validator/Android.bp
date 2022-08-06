@@ -55,6 +55,6 @@ rust_binary {
     srcs: ["src/bcc_main.rs"],
     rustlibs: [
         "libcert_request_validator",
-        "libclap_deprecated",
+        "libclap",
     ],
 }
