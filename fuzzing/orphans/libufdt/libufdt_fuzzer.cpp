@@ -55,10 +55,16 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   auto dtb = fdp.ConsumeBytes<uint8_t>(dtb_len);
   auto overlay = fdp.ConsumeRemainingBytes<uint8_t>();
 
-  /* fdt doesn't require any alignment of the dtb or overlay */
+  /* Check headers */
+  auto fdt_dtb = ufdt_install_blob(dtb.data(), dtb.size());
+  auto fdt_overlay = ufdt_install_blob(overlay.data(), overlay.size());
+
+  if (!fdt_dtb || !fdt_overlay) {
+    return 0;
+  }
+
   struct fdt_header *res =
-      ufdt_apply_overlay(reinterpret_cast<struct fdt_header*>(dtb.data()), dtb.size(),
-                         reinterpret_cast<struct fdt_header*>(overlay.data()), overlay.size());
+      ufdt_apply_overlay(fdt_dtb, dtb.size(), fdt_overlay, overlay.size());
 
   if (res) {
     dto_free(res);
