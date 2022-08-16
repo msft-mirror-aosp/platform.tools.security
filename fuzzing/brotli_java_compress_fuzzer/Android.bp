@@ -3,17 +3,20 @@ package {
 }
 
 java_fuzz_host {
-    name: "xmt_parser_fuzzer",
+    name: "brotli_java_compress_fuzzer",
     srcs: [
-        "Fuzzer.java",
+        "BrotliJavaCompressFuzzer.java",
     ],
     static_libs: [
-        "xmp_toolkit",
         "jazzer",
+        "brotli-java",
+    ],
+    jni_libs: [
+        "libbrotli_encoder_jni",
+        "libc++",
     ],
     sanitizers: [
         "address",
         "fuzzer",
     ],
-    corpus: ["testdata/*"],
 }
