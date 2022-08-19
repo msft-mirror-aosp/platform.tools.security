@@ -1,6 +1,6 @@
-//! This module describes the public key (PubKeyEd25519 or PubKeyECDSA256)
-//! used in the BccPayload. The key itself is stored as a simple byte array in
-//! a vector.
+//! This module describes the public key (PubKeyEd25519, PubKeyECDSA256 or
+//! PubKeyECDSA384) used in the BccPayload. The key itself is stored as a
+//! simple byte array in a vector.
 
 use crate::bcc::{get_label_value, get_label_value_as_bytes};
 use crate::display::write_bytes_in_hex;
@@ -24,10 +24,15 @@ pub const ED25519_SIG_LEN: usize = 64;
 pub const P256_COORD_LEN: usize = 32;
 /// Length of a P256 signature.
 pub const P256_SIG_LEN: usize = 64;
+/// Length of a P384 coordinate.
+pub const P384_COORD_LEN: usize = 48;
+/// Length of a P384 signature.
+pub const P384_SIG_LEN: usize = 96;
 
 enum PubKey {
     Ed25519 { pub_key: [u8; ED25519_PUBLIC_KEY_LEN] },
     P256 { x_coord: [u8; P256_COORD_LEN], y_coord: [u8; P256_COORD_LEN] },
+    P384 { x_coord: [u8; P384_COORD_LEN], y_coord: [u8; P384_COORD_LEN] },
 }
 /// Struct wrapping the public key byte array, and the relevant validation methods.
 pub struct PublicKey {
@@ -57,19 +62,36 @@ impl PublicKey {
                 })
             }
             coset::KeyType::Assigned(iana::KeyType::EC2) => {
-                ensure!(pkey.alg == Some(coset::Algorithm::Assigned(iana::Algorithm::ES256)));
                 let crv = get_label_value(pkey, iana::Ec2KeyParameter::Crv as i64)?;
-                ensure!(crv == &Value::from(iana::EllipticCurve::P_256 as i64));
                 let y = get_label_value_as_bytes(pkey, iana::Ec2KeyParameter::Y as i64)?;
-                PublicKey::new(PubKey::P256 {
-                    x_coord: x.as_slice().try_into().context(format!(
-                        "Failed to convert x_coord to array. Len: {:?}",
-                        x.len()
-                    ))?,
-                    y_coord: y.as_slice().try_into().context(format!(
-                        "Failed to convert y_coord to array. Len: {:?}",
-                        y.len()
-                    ))?,
+                PublicKey::new(match pkey.alg {
+                    Some(coset::Algorithm::Assigned(iana::Algorithm::ES256)) => {
+                        ensure!(crv == &Value::from(iana::EllipticCurve::P_256 as i64));
+                        PubKey::P256 {
+                            x_coord: x.as_slice().try_into().context(format!(
+                                "Failed to convert x_coord to array. Len: {:?}",
+                                x.len()
+                            ))?,
+                            y_coord: y.as_slice().try_into().context(format!(
+                                "Failed to convert y_coord to array. Len: {:?}",
+                                y.len()
+                            ))?,
+                        }
+                    }
+                    Some(coset::Algorithm::Assigned(iana::Algorithm::ES384)) => {
+                        ensure!(crv == &Value::from(iana::EllipticCurve::P_384 as i64));
+                        PubKey::P384 {
+                            x_coord: x.as_slice().try_into().context(format!(
+                                "Failed to convert x_coord to array. Len: {:?}",
+                                x.len()
+                            ))?,
+                            y_coord: y.as_slice().try_into().context(format!(
+                                "Failed to convert y_coord to array. Len: {:?}",
+                                y.len()
+                            ))?,
+                        }
+                    }
+                    _ => bail!("Need to specify ES256 or ES384 in the key. Got {:?}", pkey.alg),
                 })
             }
             _ => bail!("Unexpected KeyType value: {:?}", pkey.kty),
@@ -84,6 +106,7 @@ impl PublicKey {
         match &self.key {
             PubKey::Ed25519 { .. } => Algorithm::Assigned(iana::Algorithm::EdDSA),
             PubKey::P256 { .. } => Algorithm::Assigned(iana::Algorithm::ES256),
+            PubKey::P384 { .. } => Algorithm::Assigned(iana::Algorithm::ES384),
         }
     }
 
@@ -141,6 +164,43 @@ impl PublicKey {
             Verifier::new(MessageDigest::sha256(), &pkey).context("Failed to create verifier")?;
         verifier.verify_oneshot(&signature, message).context("Failed to verify signature")
     }
+    fn verify_p384(
+        x_coord: &[u8; P384_COORD_LEN],
+        y_coord: &[u8; P384_COORD_LEN],
+        signature: &[u8],
+        message: &[u8],
+    ) -> Result<bool> {
+        ensure!(
+            signature.len() == P384_SIG_LEN,
+            "Unexpected signature length: {:?}",
+            signature.len()
+        );
+        // Construct an X9.62 uncompressed point from the coords.
+        let mut point_uncompressed = [0; 1 + P384_COORD_LEN + P384_COORD_LEN];
+        point_uncompressed[0] = 0x04;
+        point_uncompressed[1..1 + P384_COORD_LEN].copy_from_slice(x_coord);
+        point_uncompressed[1 + P384_COORD_LEN..].copy_from_slice(y_coord);
+        // Initialize a key based on the point.
+        let group = EcGroup::from_curve_name(Nid::SECP384R1)
+            .context("Failed to construct secp384r1 group")?;
+        let mut ctx = BigNumContext::new().context("Failed to allocate BigNumContext")?;
+        let point = EcPoint::from_bytes(&group, &point_uncompressed, &mut ctx)
+            .context("Failed to create EC point")?;
+        let key =
+            EcKey::from_public_key(&group, &point).context("Failed to create EC public key")?;
+        let pkey = PKey::from_ec_key(key).context("Failed to create PKey")?;
+        // Convert the signature from raw to DER format.
+        let (r, s) = signature.split_at(P384_COORD_LEN);
+        let r = BigNum::from_slice(r).context("Failed to create BigNum for r")?;
+        let s = BigNum::from_slice(s).context("Failed to create BigNum for s")?;
+        let signature =
+            EcdsaSig::from_private_components(r, s).context("Failed to create ECDSA signature")?;
+        let signature = signature.to_der().context("Failed to DER encode signature")?;
+        // Verify the signature against the message.
+        let mut verifier =
+            Verifier::new(MessageDigest::sha384(), &pkey).context("Failed to create verifier")?;
+        verifier.verify_oneshot(&signature, message).context("Failed to verify signature")
+    }
 
     /// Verify that the signature obtained from signing the given message
     /// with the PublicKey matches the signature provided.
@@ -149,6 +209,9 @@ impl PublicKey {
             PubKey::Ed25519 { pub_key } => Self::verify_ed25519(pub_key, signature, message)?,
             PubKey::P256 { x_coord, y_coord } => {
                 Self::verify_p256(x_coord, y_coord, signature, message)?
+            }
+            PubKey::P384 { x_coord, y_coord } => {
+                Self::verify_p384(x_coord, y_coord, signature, message)?
             }
         };
         ensure!(verified, "Signature verification failed.");
@@ -165,6 +228,12 @@ impl Display for PublicKey {
             }
             PubKey::P256 { x_coord, y_coord } => {
                 f.write_str("P256 X: ")?;
+                write_bytes_in_hex(f, &x_coord)?;
+                f.write_str(" Y: ")?;
+                write_bytes_in_hex(f, &y_coord)?;
+            }
+            PubKey::P384 { x_coord, y_coord } => {
+                f.write_str("P384 X: ")?;
                 write_bytes_in_hex(f, &x_coord)?;
                 f.write_str(" Y: ")?;
                 write_bytes_in_hex(f, &y_coord)?;
