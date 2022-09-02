@@ -12,12 +12,6 @@ pub const CODE_DESC: i64 = -4670546;
 pub const CONFIG_HASH: i64 = -4670547;
 /// Configuration Descriptor.
 pub const CONFIG_DESC: i64 = -4670548;
-/// Component name.
-pub const COMPONENT_NAME: i64 = -70002;
-/// Firmware version.
-pub const FIRMWARE_VERSION: i64 = -70003;
-/// Resettable.
-pub const RESETABLE: i64 = -70004;
 /// Authority Hash.
 pub const AUTHORITY_HASH: i64 = -4670549;
 /// Authority Descriptor.
@@ -28,3 +22,12 @@ pub const MODE: i64 = -4670551;
 pub const SUBJECT_PUBLIC_KEY: i64 = -4670552;
 /// Key usage.
 pub const KEY_USAGE: i64 = -4670553;
+
+// Note that these fields are defined by Android's BCC.
+
+/// Component name.
+pub const COMPONENT_NAME: i64 = -70002;
+/// Component version.
+pub const COMPONENT_VERSION: i64 = -70003;
+/// Resettable.
+pub const RESETTABLE: i64 = -70004;
