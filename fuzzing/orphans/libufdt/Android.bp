@@ -13,6 +13,9 @@ cc_fuzz {
         "libufdt",
         "libufdt_sysdeps",
     ],
+    cflags: [
+        "-DDTO_DISABLE_ERROR_MSG"
+    ],
     corpus: ["corpus/*"],
     fuzz_config: {
         cc: [
