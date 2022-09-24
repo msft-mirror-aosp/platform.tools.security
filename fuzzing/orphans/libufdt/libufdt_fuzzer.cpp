@@ -26,7 +26,7 @@ extern "C" {
 /* Count split value, plus 1 byte for dto and overlay each */
 constexpr uint32_t kMinData = sizeof(uint32_t) + 2;
 
-constexpr uint32_t kMaxData = 1024 * 8;
+constexpr uint32_t kMaxData = 1024 * 512;
 
 /* libFuzzer driver.
  * We need two dtb's to test merging, so split the input data block, using
