@@ -10,7 +10,7 @@ use crate::{value_from_bytes, value_from_file};
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use ciborium::value::Value;
 use coset::AsCborValue;
-use coset::{iana, Algorithm, CborSerializable, CoseKey, CoseSign1, Header, RegisteredLabel};
+use coset::{Algorithm, CborSerializable, CoseKey, CoseSign1, Header};
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter};
@@ -32,6 +32,19 @@ pub fn check_sign1_chain<T: IntoIterator<Item = Value>>(
     for (n, value) in values.enumerate() {
         let payload = Payload::from_cbor_sign1(previous_public_key, expected_issuer, value)
             .with_context(|| format!("Invalid BccPayload at index {}", n))?;
+        if expected_issuer.is_none() {
+            ensure!(
+                payload.issuer == payload.subject,
+                "Root certificate subject and issuer must match. Issuer: {}, subject: {}",
+                payload.issuer,
+                payload.subject,
+            );
+            ensure!(
+                !payload.config_desc.resettable,
+                "The root of the chain must not change on factory reset, as it is intended to \
+                be a fixed identifier for the lifetime of the device",
+            );
+        }
         payloads.push(payload);
 
         let previous = payloads.last().unwrap();
@@ -39,7 +52,7 @@ pub fn check_sign1_chain<T: IntoIterator<Item = Value>>(
         previous_public_key = Some(&previous.subject_public_key);
     }
 
-    ensure!(!payloads.is_empty());
+    ensure!(!payloads.is_empty(), "Cert chain is empty.");
 
     Ok(payloads)
 }
@@ -58,11 +71,11 @@ pub fn check_sign1_cert_chain(certs: &[&str]) -> Result<Vec<Payload>> {
 /// Validate the protected header of a bcc entry with respect to the provided
 /// alg (typically originating from the subject public key of the payload).
 fn check_protected_header(alg: &Algorithm, header: &Header) -> Result<()> {
-    ensure!(header.alg.as_ref() == Some(alg));
-    ensure!(header
-        .crit
-        .iter()
-        .all(|l| l == &RegisteredLabel::Assigned(iana::HeaderParameter::Alg)));
+    ensure!(
+        header.alg.as_ref() == Some(alg),
+        "Protected 'alg' header doesn't have the expected algorithm"
+    );
+    ensure!(header.crit.is_empty(), "No critical header values may be defined in the BCC");
     Ok(())
 }
 
@@ -138,8 +151,11 @@ impl Payload {
         expected_issuer: Option<&str>,
         cbor: Value,
     ) -> Result<Self> {
-        let entry = CoseSign1::from_cbor_value(cbor).map_err(cose_error)?;
-        let payload = Self::from_sign1(public_key, expected_issuer, &entry)?;
+        let entry = CoseSign1::from_cbor_value(cbor)
+            .map_err(cose_error)
+            .context("Given CBOR does not appear to be a COSE_sign1")?;
+        let payload = Self::from_sign1(public_key, expected_issuer, &entry)
+            .context("Unable to extract payload from COSE_sign1")?;
         Ok(payload)
     }
 
@@ -159,7 +175,13 @@ impl Payload {
         let bytes = sign1.payload.as_ref().ok_or_else(|| anyhow!("no payload"))?;
         let payload = Self::from_slice(bytes.as_slice())?;
         if let Some(expected_issuer) = expected_issuer {
-            ensure!(payload.issuer == expected_issuer, "Subject/Issuer mismatch");
+            ensure!(
+                payload.issuer == expected_issuer,
+                "COSE_sign1's issuer ({}) does not match the subject of the previous payload in \
+                the chain ({}).",
+                payload.issuer,
+                expected_issuer
+            );
         }
         Ok(payload)
     }
@@ -201,26 +223,32 @@ impl Payload {
             }
         }
 
-        let issuer = issuer.into_string()?;
-        let subject = subject.into_string()?;
-        let subject_public_key = subject_public_key.into_bytes()?;
-        let mode = mode.into_bytes()?;
-        let code_desc = code_desc.into_optional_bytes()?;
-        let code_hash = code_hash.into_bytes()?;
-        let config_desc = config_desc.into_bytes()?;
-        let config_hash = config_hash.into_optional_bytes()?;
-        let authority_desc = authority_desc.into_optional_bytes()?;
-        let authority_hash = authority_hash.into_bytes()?;
-        let key_usage = key_usage.into_bytes()?;
+        let issuer = issuer.into_string().context("Issuer must be a string")?;
+        let subject = subject.into_string().context("Subject must be a string")?;
+        let subject_public_key =
+            subject_public_key.into_bytes().context("Subject public key must be bytes")?;
+        let mode = mode.into_bytes().context("Mode must be bytes")?;
+        let code_desc = code_desc.into_optional_bytes().context("Code descriptor must be bytes")?;
+        let code_hash = code_hash.into_bytes().context("Code hash must be bytes")?;
+        let config_desc = config_desc.into_bytes().context("Config descriptor must be bytes")?;
+        let config_hash = config_hash.into_optional_bytes().context("Config hash must be bytes")?;
+        let authority_desc =
+            authority_desc.into_optional_bytes().context("Authority descriptor must be bytes")?;
+        let authority_hash = authority_hash.into_bytes().context("Authority hash must be bytes")?;
+        let key_usage = key_usage.into_bytes().context("Key usage must be bytes")?;
 
-        let subject_public_key = CoseKey::from_slice(&subject_public_key).map_err(cose_error)?;
-        let subject_public_key = PublicKey::from_cose_key(&subject_public_key)?;
+        let subject_public_key = CoseKey::from_slice(&subject_public_key)
+            .map_err(cose_error)
+            .context("Error parsing subject public key from bytes")?;
+        let subject_public_key = PublicKey::from_cose_key(&subject_public_key)
+            .context("Error parsing subject public key from COSE_key")?;
         if mode.len() != 1 {
-            bail!("mode must be a single byte")
+            bail!("Expected mode to be a single byte, actual byte count: {}", mode.len())
         };
         let mode = DiceMode::from(mode[0]);
 
-        let config_desc = ConfigDesc::from_slice(&config_desc)?;
+        let config_desc = ConfigDesc::from_slice(&config_desc)
+            .context("Error parsing config descriptor from bytes")?;
 
         if key_usage.len() != 1 || key_usage[0] != 0x20 {
             bail!("key usage must be keyCertSign")
@@ -283,9 +311,15 @@ impl ConfigDesc {
         for (key, value) in entries.into_iter() {
             if let Ok(key) = key.as_i64() {
                 match key {
-                    dice::COMPONENT_NAME => component_name.set(value)?,
-                    dice::COMPONENT_VERSION => component_version.set(value)?,
-                    dice::RESETTABLE => resettable.set(value)?,
+                    dice::COMPONENT_NAME => {
+                        component_name.set(value).context("Error setting component name")?
+                    }
+                    dice::COMPONENT_VERSION => {
+                        component_version.set(value).context("Error setting component version")?
+                    }
+                    dice::RESETTABLE => {
+                        resettable.set(value).context("Error setting resettable")?
+                    }
                     _ => match extensions.entry(key) {
                         Vacant(entry) => {
                             entry.insert(value);
@@ -300,16 +334,19 @@ impl ConfigDesc {
             }
         }
 
-        let component_name = component_name.into_optional_string()?;
-        let component_version = component_version.into_optional_i64()?;
-        let resettable = resettable.is_null()?;
+        let component_name =
+            component_name.into_optional_string().context("Component name must be a string")?;
+        let component_version = component_version
+            .into_optional_i64()
+            .context("Component version must be an integer")?;
+        let resettable = resettable.is_null().context("Error interpreting resettable field")?;
 
         Ok(Self { component_name, component_version, resettable, extensions })
     }
 }
 
 fn cbor_map_from_slice(bytes: &[u8]) -> Result<Vec<(Value, Value)>> {
-    let value = value_from_bytes(bytes)?;
+    let value = value_from_bytes(bytes).context("Error parsing CBOR into a map")?;
     let entries = match value {
         Value::Map(entries) => entries,
         _ => bail!("Not a map: {:?}", value),
