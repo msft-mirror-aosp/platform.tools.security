@@ -28,7 +28,6 @@ fn main() -> Result<()> {
         Some(("verify-chain", sub_args)) => {
             if let Some(chain) = sub_args.value_of("chain") {
                 let chain = bcc::Chain::from_bytes(&fs::read(chain)?)?;
-                println!("Success!");
                 if sub_args.is_present("dump") {
                     print!("{}", chain);
                 }
@@ -39,7 +38,6 @@ fn main() -> Result<()> {
             if let Some(certs) = sub_args.values_of("certs") {
                 let certs: Vec<_> = certs.collect();
                 let payloads = bcc::entry::check_sign1_cert_chain(&certs)?;
-                println!("Success!");
                 if sub_args.is_present("dump") {
                     for (i, payload) in payloads.iter().enumerate() {
                         println!("Cert {}:", i);
