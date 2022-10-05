@@ -32,21 +32,18 @@ impl Chain {
          * ]
          */
 
-        let value = value_from_bytes(bytes).context("Unable to decode top-level CBOR")?;
+        let value = value_from_bytes(bytes)?;
         let array = match value {
             Array(array) if array.len() >= 2 => array,
-            _ => bail!("Invalid BCC. Expected an array of at least length 2, found: {:?}", value),
+            _ => bail!("Invalid BCC: {:?}", value),
         };
         let mut it = array.into_iter();
 
-        let root_public_key = CoseKey::from_cbor_value(it.next().unwrap())
-            .map_err(cose_error)
-            .context("Error parsing root public key CBOR")?;
+        let root_public_key = CoseKey::from_cbor_value(it.next().unwrap()).map_err(cose_error)?;
         let root_public_key =
             PublicKey::from_cose_key(&root_public_key).context("Invalid root key")?;
 
-        let payloads =
-            check_sign1_chain(it, Some(&root_public_key)).context("Invalid certificate chain")?;
+        let payloads = check_sign1_chain(it, Some(&root_public_key))?;
 
         Ok(Self { root_public_key, payloads })
     }
