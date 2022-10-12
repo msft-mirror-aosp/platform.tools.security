@@ -15,9 +15,13 @@ cc_fuzz {
     ],
     corpus: ["corpus/*"],
     fuzz_config: {
-        cc: [
-            "mikemcternan@google.com",
-        ],
+        cc: [ "mikemcternan@google.com" ],
+        target_modules: [ "libufdt", "libufdt_sysdeps" ],
+        description:
+            "Fuzzer that checks parsing of faulty FDT blobs and " +
+            "application of overlays to ensure no undefined or OOB " +
+            "behaviours.",
+        acknowledgement: [ "Mike McTernan of Google" ],
     },
     host_supported: true,
 }
