@@ -29,3 +29,13 @@ java_fuzz_host {
     corpus: ["testdata/*"],
     dictionary: "example_java_fuzzer.dict",
 }
+
+java_fuzz {
+    name: "example_java_fuzzer_device",
+    srcs: ["ExampleFuzzer.java"],
+    static_libs: [
+        "jazzer",
+    ],
+    corpus: ["testdata/*"],
+    dictionary: "example_java_fuzzer.dict",
+}
