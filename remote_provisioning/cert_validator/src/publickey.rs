@@ -127,25 +127,26 @@ impl PublicKey {
         verifier.verify_oneshot(signature, message).context("Failed to verify signature")
     }
 
-    fn verify_p256(
-        x_coord: &[u8; P256_COORD_LEN],
-        y_coord: &[u8; P256_COORD_LEN],
+    fn verify_ec(
+        nid: Nid,
+        x_coord: &[u8],
+        y_coord: &[u8],
         signature: &[u8],
         message: &[u8],
     ) -> Result<bool> {
-        ensure!(
-            signature.len() == P256_SIG_LEN,
-            "Unexpected signature length: {:?}",
-            signature.len()
-        );
+        let (coord_len, sig_len, digest) = match nid {
+            Nid::X9_62_PRIME256V1 => (P256_COORD_LEN, P256_SIG_LEN, MessageDigest::sha256()),
+            Nid::SECP384R1 => (P384_COORD_LEN, P384_SIG_LEN, MessageDigest::sha384()),
+            _ => bail!("Unsupported curve: {:?}", nid),
+        };
+        ensure!(signature.len() == sig_len, "Unexpected signature length: {:?}", signature.len());
         // Construct an X9.62 uncompressed point from the coords.
-        let mut point_uncompressed = [0; 1 + P256_COORD_LEN + P256_COORD_LEN];
+        let mut point_uncompressed = vec![0; 1 + coord_len + coord_len];
         point_uncompressed[0] = 0x04;
-        point_uncompressed[1..1 + P256_COORD_LEN].copy_from_slice(x_coord);
-        point_uncompressed[1 + P256_COORD_LEN..].copy_from_slice(y_coord);
+        point_uncompressed[1..1 + coord_len].copy_from_slice(x_coord);
+        point_uncompressed[1 + coord_len..].copy_from_slice(y_coord);
         // Initialize a key based on the point.
-        let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)
-            .context("Failed to construct X9_62_prime256v1 group")?;
+        let group = EcGroup::from_curve_name(nid).context("Failed to construct curve group")?;
         let mut ctx = BigNumContext::new().context("Failed to allocate BigNumContext")?;
         let point = EcPoint::from_bytes(&group, &point_uncompressed, &mut ctx)
             .context("Failed to create EC point")?;
@@ -153,52 +154,14 @@ impl PublicKey {
             EcKey::from_public_key(&group, &point).context("Failed to create EC public key")?;
         let pkey = PKey::from_ec_key(key).context("Failed to create PKey")?;
         // Convert the signature from raw to DER format.
-        let (r, s) = signature.split_at(P256_COORD_LEN);
+        let (r, s) = signature.split_at(coord_len);
         let r = BigNum::from_slice(r).context("Failed to create BigNum for r")?;
         let s = BigNum::from_slice(s).context("Failed to create BigNum for s")?;
         let signature =
             EcdsaSig::from_private_components(r, s).context("Failed to create ECDSA signature")?;
         let signature = signature.to_der().context("Failed to DER encode signature")?;
         // Verify the signature against the message.
-        let mut verifier =
-            Verifier::new(MessageDigest::sha256(), &pkey).context("Failed to create verifier")?;
-        verifier.verify_oneshot(&signature, message).context("Failed to verify signature")
-    }
-    fn verify_p384(
-        x_coord: &[u8; P384_COORD_LEN],
-        y_coord: &[u8; P384_COORD_LEN],
-        signature: &[u8],
-        message: &[u8],
-    ) -> Result<bool> {
-        ensure!(
-            signature.len() == P384_SIG_LEN,
-            "Unexpected signature length: {:?}",
-            signature.len()
-        );
-        // Construct an X9.62 uncompressed point from the coords.
-        let mut point_uncompressed = [0; 1 + P384_COORD_LEN + P384_COORD_LEN];
-        point_uncompressed[0] = 0x04;
-        point_uncompressed[1..1 + P384_COORD_LEN].copy_from_slice(x_coord);
-        point_uncompressed[1 + P384_COORD_LEN..].copy_from_slice(y_coord);
-        // Initialize a key based on the point.
-        let group = EcGroup::from_curve_name(Nid::SECP384R1)
-            .context("Failed to construct secp384r1 group")?;
-        let mut ctx = BigNumContext::new().context("Failed to allocate BigNumContext")?;
-        let point = EcPoint::from_bytes(&group, &point_uncompressed, &mut ctx)
-            .context("Failed to create EC point")?;
-        let key =
-            EcKey::from_public_key(&group, &point).context("Failed to create EC public key")?;
-        let pkey = PKey::from_ec_key(key).context("Failed to create PKey")?;
-        // Convert the signature from raw to DER format.
-        let (r, s) = signature.split_at(P384_COORD_LEN);
-        let r = BigNum::from_slice(r).context("Failed to create BigNum for r")?;
-        let s = BigNum::from_slice(s).context("Failed to create BigNum for s")?;
-        let signature =
-            EcdsaSig::from_private_components(r, s).context("Failed to create ECDSA signature")?;
-        let signature = signature.to_der().context("Failed to DER encode signature")?;
-        // Verify the signature against the message.
-        let mut verifier =
-            Verifier::new(MessageDigest::sha384(), &pkey).context("Failed to create verifier")?;
+        let mut verifier = Verifier::new(digest, &pkey).context("Failed to create verifier")?;
         verifier.verify_oneshot(&signature, message).context("Failed to verify signature")
     }
 
@@ -208,10 +171,12 @@ impl PublicKey {
         let verified = match &self.key {
             PubKey::Ed25519 { pub_key } => Self::verify_ed25519(pub_key, signature, message)?,
             PubKey::P256 { x_coord, y_coord } => {
-                Self::verify_p256(x_coord, y_coord, signature, message)?
+                Self::verify_ec(Nid::X9_62_PRIME256V1, x_coord, y_coord, signature, message)
+                    .context("Failed to verify p256 signature")?
             }
             PubKey::P384 { x_coord, y_coord } => {
-                Self::verify_p384(x_coord, y_coord, signature, message)?
+                Self::verify_ec(Nid::SECP384R1, x_coord, y_coord, signature, message)
+                    .context("Failed to verify p384 signature")?
             }
         };
         ensure!(verified, "Signature verification failed.");
