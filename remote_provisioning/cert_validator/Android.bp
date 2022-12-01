@@ -57,3 +57,14 @@ rust_binary {
         "libclap",
     ],
 }
+
+rust_test {
+    name: "bcc_validator.test",
+    defaults: ["cert_request_validator_defaults"],
+    srcs: ["src/bcc_main.rs"],
+    rustlibs: [
+        "libcert_request_validator",
+        "libclap",
+    ],
+    test_suites: ["general-tests"],
+}
