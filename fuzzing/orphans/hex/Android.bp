@@ -1,4 +1,4 @@
-// Copyright 2021, The Android Open Source Project
+// Copyright 2022, The Android Open Source Project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,26 +16,17 @@ package {
     default_applicable_licenses: ["Android-Apache-2.0"],
 }
 
-java_fuzz_host {
-    name: "example_java_fuzzer",
-    srcs: ["ExampleFuzzer.java"],
-    static_libs: [
-        "jazzer",
+rust_fuzz {
+    name: "hex_encoding_fuzzer",
+    srcs: ["hex_encoding_fuzzer.rs"],
+    rustlibs: [
+        "libhex",
     ],
     fuzz_config: {
-        fuzz_on_haiku_device: false,
-        fuzz_on_haiku_host: false,
+        cc: [
+            "aliceywang@google.com",
+        ],
+        fuzz_on_haiku_device: true,
+        fuzz_on_haiku_host: true,
     },
-    corpus: ["testdata/*"],
-    dictionary: "example_java_fuzzer.dict",
-}
-
-java_fuzz {
-    name: "example_java_fuzzer_device",
-    srcs: ["ExampleFuzzer.java"],
-    static_libs: [
-        "jazzer",
-    ],
-    corpus: ["testdata/*"],
-    dictionary: "example_java_fuzzer.dict",
 }
