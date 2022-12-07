@@ -30,3 +30,18 @@ rust_fuzz {
         fuzz_on_haiku_host: true,
     },
 }
+
+rust_fuzz {
+    name: "hex_decoding_fuzzer",
+    srcs: ["hex_decoding_fuzzer.rs"],
+    rustlibs: [
+        "libhex",
+    ],
+    fuzz_config: {
+        cc: [
+            "aliceywang@google.com",
+        ],
+        fuzz_on_haiku_device: true,
+        fuzz_on_haiku_host: false,
+    },
+}
