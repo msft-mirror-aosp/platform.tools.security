@@ -1,9 +1,7 @@
 //! The cert validator library provides validation functions for the CBOR-CDDL
-//! based certificate request, allowing validation of BCC certificate chain,
-//! deviceinfo among other things.
+//! based certificate request, allowing validation of BCC certificate chain.
 
 pub mod bcc;
-pub mod deviceinfo;
 pub mod dice;
 mod display;
 pub mod publickey;
