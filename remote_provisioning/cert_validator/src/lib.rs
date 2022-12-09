@@ -5,7 +5,6 @@ pub mod bcc;
 pub mod dice;
 mod display;
 pub mod publickey;
-pub mod valueas;
 
 use anyhow::{bail, Context, Result};
 use ciborium::{de::from_reader, value::Value};
@@ -32,13 +31,12 @@ pub fn value_from_bytes(mut bytes: &[u8]) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use valueas::ValueAs;
 
     #[test]
     fn value_from_bytes_valid_succeeds() -> Result<()> {
         let bytes = [0x82, 0x04, 0x02]; // [4, 2]
         let val = value_from_bytes(&bytes)?;
-        let array = ValueAs::as_array(&val)?;
+        let array = val.as_array().unwrap();
         assert_eq!(array.len(), 2);
         Ok(())
     }
