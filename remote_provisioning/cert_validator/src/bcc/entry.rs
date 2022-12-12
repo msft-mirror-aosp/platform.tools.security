@@ -6,7 +6,6 @@ use crate::dice;
 use crate::display::{write_bytes_field, write_value};
 use crate::publickey::PublicKey;
 use crate::value_from_bytes;
-use crate::valueas::ValueAs;
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use ciborium::value::Value;
 use coset::AsCborValue;
@@ -149,7 +148,7 @@ impl Payload {
         let mut key_usage = FieldValue::new("key usage");
 
         for (key, value) in entries.into_iter() {
-            if let Ok(key) = key.as_i64() {
+            if let Some(Ok(key)) = key.as_integer().map(TryInto::try_into) {
                 let field = match key {
                     dice::ISS => &mut issuer,
                     dice::SUB => &mut subject,
@@ -256,7 +255,7 @@ impl ConfigDesc {
         let mut extensions = HashMap::new();
 
         for (key, value) in entries.into_iter() {
-            if let Ok(key) = key.as_i64() {
+            if let Some(Ok(key)) = key.as_integer().map(TryInto::try_into) {
                 match key {
                     dice::COMPONENT_NAME => {
                         component_name.set(value).context("Error setting component name")?
