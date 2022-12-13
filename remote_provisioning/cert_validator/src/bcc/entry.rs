@@ -5,8 +5,7 @@ use super::field_value::FieldValue;
 use crate::dice;
 use crate::display::{write_bytes_field, write_value};
 use crate::publickey::PublicKey;
-use crate::valueas::ValueAs;
-use crate::{value_from_bytes, value_from_file};
+use crate::value_from_bytes;
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use ciborium::value::Value;
 use coset::AsCborValue;
@@ -14,46 +13,6 @@ use coset::{Algorithm, CborSerializable, CoseKey, CoseSign1, Header};
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter};
-
-/// Parse a series of BccEntry certificates,represented as CBOR Values, checking the public key of
-/// any given cert's payload in the series correctly signs the next, and verifying the payloads
-/// are well formed. If root_key is specified then it must be the key used to sign the first (root)
-/// certificate; otherwise that signature is not checked.
-pub fn check_sign1_chain<T: IntoIterator<Item = Value>>(
-    chain: T,
-    root_key: Option<&PublicKey>,
-) -> Result<Vec<Payload>> {
-    let values = chain.into_iter();
-    let mut payloads = Vec::<Payload>::with_capacity(values.size_hint().0);
-
-    let mut previous_public_key = root_key;
-    let mut expected_issuer: Option<&str> = None;
-
-    for (n, value) in values.enumerate() {
-        let payload = Payload::from_cbor_sign1(previous_public_key, expected_issuer, value)
-            .with_context(|| format!("Invalid BccPayload at index {}", n))?;
-        payloads.push(payload);
-
-        let previous = payloads.last().unwrap();
-        expected_issuer = Some(previous.subject.as_str());
-        previous_public_key = Some(&previous.subject_public_key);
-    }
-
-    ensure!(!payloads.is_empty(), "Cert chain is empty.");
-
-    Ok(payloads)
-}
-
-/// Read a series of bcc file certificates and verify that the public key of
-/// any given cert's payload in the series correctly signs the next cose
-/// sign1 cert.
-pub fn check_sign1_cert_chain(certs: &[&str]) -> Result<Vec<Payload>> {
-    let root_key = None;
-    // certs.iter() gives us an iterator over &&str; we need to use copied() here to
-    // convert to an iterator over &str.
-    let chain = certs.iter().copied().map(value_from_file).collect::<Result<Vec<_>>>()?;
-    check_sign1_chain(chain, root_key)
-}
 
 /// Validate the protected header of a bcc entry with respect to the provided
 /// alg (typically originating from the subject public key of the payload).
@@ -133,7 +92,7 @@ impl Display for Payload {
 }
 
 impl Payload {
-    fn from_cbor_sign1(
+    pub(super) fn from_cbor_sign1(
         public_key: Option<&PublicKey>,
         expected_issuer: Option<&str>,
         cbor: Value,
@@ -189,7 +148,7 @@ impl Payload {
         let mut key_usage = FieldValue::new("key usage");
 
         for (key, value) in entries.into_iter() {
-            if let Ok(key) = key.as_i64() {
+            if let Some(Ok(key)) = key.as_integer().map(TryInto::try_into) {
                 let field = match key {
                     dice::ISS => &mut issuer,
                     dice::SUB => &mut subject,
@@ -296,7 +255,7 @@ impl ConfigDesc {
         let mut extensions = HashMap::new();
 
         for (key, value) in entries.into_iter() {
-            if let Ok(key) = key.as_i64() {
+            if let Some(Ok(key)) = key.as_integer().map(TryInto::try_into) {
                 match key {
                     dice::COMPONENT_NAME => {
                         component_name.set(value).context("Error setting component name")?
@@ -344,41 +303,7 @@ fn cbor_map_from_slice(bytes: &[u8]) -> Result<Vec<(Value, Value)>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::value_from_file;
     use coset::{iana, Header, Label, RegisteredLabel};
-
-    #[test]
-    fn test_check_sign1_cert_chain() -> Result<()> {
-        let arr: Vec<&str> = vec![
-            "testdata/bcc/_CBOR_Ed25519_cert_full_cert_chain_0.cert",
-            "testdata/bcc/_CBOR_Ed25519_cert_full_cert_chain_1.cert",
-            "testdata/bcc/_CBOR_Ed25519_cert_full_cert_chain_2.cert",
-        ];
-        check_sign1_cert_chain(&arr)?;
-        Ok(())
-    }
-
-    #[test]
-    fn test_check_sign1_cert_chain_invalid() {
-        let arr: Vec<&str> = vec![
-            "testdata/bcc/_CBOR_Ed25519_cert_full_cert_chain_0.cert",
-            "testdata/bcc/_CBOR_Ed25519_cert_full_cert_chain_2.cert",
-        ];
-        assert!(check_sign1_cert_chain(&arr).is_err());
-    }
-
-    #[test]
-    fn test_check_sign1_chain_array() -> Result<()> {
-        let cbor_file = value_from_file("testdata/bcc/_CBOR_bcc_entry_cert_array.cert")?;
-        let cbor_arr = match cbor_file {
-            Value::Array(a) => a,
-            _ => bail!("Not an array"),
-        };
-        assert_eq!(cbor_arr.len(), 3);
-        let root_key = None;
-        check_sign1_chain(cbor_arr, root_key)?;
-        Ok(())
-    }
 
     #[test]
     fn test_check_bcc_entry_protected_header() -> Result<()> {
