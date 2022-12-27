@@ -29,6 +29,12 @@ pub const P384_COORD_LEN: usize = 48;
 /// Length of a P384 signature.
 pub const P384_SIG_LEN: usize = 96;
 
+/// Enumeration of the elliptic curve algorithms that are supported.
+enum SupportedEc {
+    P256,
+    P384,
+}
+
 enum PubKey {
     Ed25519 { pub_key: [u8; ED25519_PUBLIC_KEY_LEN] },
     P256 { x_coord: [u8; P256_COORD_LEN], y_coord: [u8; P256_COORD_LEN] },
@@ -82,7 +88,7 @@ impl PublicKey {
                                 y.len()
                             ))?,
                         };
-                        let pkey = Self::ec_pkey_from_bytes(Nid::X9_62_PRIME256V1, x, y)
+                        let pkey = Self::ec_pkey_from_bytes(SupportedEc::P256, x, y)
                             .context("Failed to instantiate key")?;
                         Ok(Self { key, pkey })
                     }
@@ -98,7 +104,7 @@ impl PublicKey {
                                 y.len()
                             ))?,
                         };
-                        let pkey = Self::ec_pkey_from_bytes(Nid::SECP384R1, x, y)
+                        let pkey = Self::ec_pkey_from_bytes(SupportedEc::P384, x, y)
                             .context("Failed to instantiate key")?;
                         Ok(Self { key, pkey })
                     }
@@ -109,11 +115,14 @@ impl PublicKey {
         }
     }
 
-    fn ec_pkey_from_bytes(nid: Nid, x_coord: &[u8], y_coord: &[u8]) -> Result<PKey<Public>> {
-        let coord_len = match nid {
-            Nid::X9_62_PRIME256V1 => P256_COORD_LEN,
-            Nid::SECP384R1 => P384_COORD_LEN,
-            _ => unreachable!(),
+    fn ec_pkey_from_bytes(
+        curve: SupportedEc,
+        x_coord: &[u8],
+        y_coord: &[u8],
+    ) -> Result<PKey<Public>> {
+        let (nid, coord_len) = match curve {
+            SupportedEc::P256 => (Nid::X9_62_PRIME256V1, P256_COORD_LEN),
+            SupportedEc::P384 => (Nid::SECP384R1, P384_COORD_LEN),
         };
         // Construct an X9.62 uncompressed point from the coords.
         let mut point_uncompressed = vec![0; 1 + coord_len + coord_len];
@@ -149,11 +158,10 @@ impl PublicKey {
         verifier.verify_oneshot(signature, message).context("Failed to verify signature")
     }
 
-    fn verify_ec(&self, nid: Nid, signature: &[u8], message: &[u8]) -> Result<bool> {
-        let (coord_len, sig_len, digest) = match nid {
-            Nid::X9_62_PRIME256V1 => (P256_COORD_LEN, P256_SIG_LEN, MessageDigest::sha256()),
-            Nid::SECP384R1 => (P384_COORD_LEN, P384_SIG_LEN, MessageDigest::sha384()),
-            _ => bail!("Unsupported curve: {:?}", nid),
+    fn verify_ec(&self, curve: SupportedEc, signature: &[u8], message: &[u8]) -> Result<bool> {
+        let (coord_len, sig_len, digest) = match curve {
+            SupportedEc::P256 => (P256_COORD_LEN, P256_SIG_LEN, MessageDigest::sha256()),
+            SupportedEc::P384 => (P384_COORD_LEN, P384_SIG_LEN, MessageDigest::sha384()),
         };
         ensure!(signature.len() == sig_len, "Unexpected signature length: {:?}", signature.len());
         // Convert the signature from raw to DER format.
@@ -175,10 +183,10 @@ impl PublicKey {
         let verified = match &self.key {
             PubKey::Ed25519 { .. } => self.verify_ed25519(signature, message)?,
             PubKey::P256 { .. } => self
-                .verify_ec(Nid::X9_62_PRIME256V1, signature, message)
+                .verify_ec(SupportedEc::P256, signature, message)
                 .context("Failed to verify p256 signature")?,
             PubKey::P384 { .. } => self
-                .verify_ec(Nid::SECP384R1, signature, message)
+                .verify_ec(SupportedEc::P384, signature, message)
                 .context("Failed to verify p384 signature")?,
         };
         ensure!(verified, "Signature verification failed.");
