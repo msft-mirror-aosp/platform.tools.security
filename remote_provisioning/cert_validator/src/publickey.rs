@@ -12,7 +12,7 @@ use openssl::ec::{EcGroup, EcKey, EcPoint};
 use openssl::ecdsa::EcdsaSig;
 use openssl::hash::MessageDigest;
 use openssl::nid::Nid;
-use openssl::pkey::{Id, PKey};
+use openssl::pkey::{Id, PKey, Public};
 use openssl::sign::Verifier;
 use std::fmt::{self, Display, Formatter};
 
@@ -29,14 +29,22 @@ pub const P384_COORD_LEN: usize = 48;
 /// Length of a P384 signature.
 pub const P384_SIG_LEN: usize = 96;
 
+/// Enumeration of the elliptic curve algorithms that are supported.
+enum SupportedEc {
+    P256,
+    P384,
+}
+
 enum PubKey {
     Ed25519 { pub_key: [u8; ED25519_PUBLIC_KEY_LEN] },
     P256 { x_coord: [u8; P256_COORD_LEN], y_coord: [u8; P256_COORD_LEN] },
     P384 { x_coord: [u8; P384_COORD_LEN], y_coord: [u8; P384_COORD_LEN] },
 }
-/// Struct wrapping the public key byte array, and the relevant validation methods.
+
+/// Struct wrapping the public key and relevant validation methods.
 pub struct PublicKey {
     key: PubKey,
+    pkey: PKey<Public>,
 }
 
 impl PublicKey {
@@ -54,20 +62,23 @@ impl PublicKey {
                 ensure!(pkey.alg == Some(coset::Algorithm::Assigned(iana::Algorithm::EdDSA)));
                 let crv = get_label_value(pkey, iana::OkpKeyParameter::Crv as i64)?;
                 ensure!(crv == &Value::from(iana::EllipticCurve::Ed25519 as i64));
-                PublicKey::new(PubKey::Ed25519 {
+                let key = PubKey::Ed25519 {
                     pub_key: x.as_slice().try_into().context(format!(
                         "Failed to convert x_coord to array. Len: {:?}",
                         x.len()
                     ))?,
-                })
+                };
+                let pkey = PKey::public_key_from_raw_bytes(x, Id::ED25519)
+                    .context("Failed to instantiate key")?;
+                Ok(Self { key, pkey })
             }
             coset::KeyType::Assigned(iana::KeyType::EC2) => {
                 let crv = get_label_value(pkey, iana::Ec2KeyParameter::Crv as i64)?;
                 let y = get_label_value_as_bytes(pkey, iana::Ec2KeyParameter::Y as i64)?;
-                PublicKey::new(match pkey.alg {
+                match pkey.alg {
                     Some(coset::Algorithm::Assigned(iana::Algorithm::ES256)) => {
                         ensure!(crv == &Value::from(iana::EllipticCurve::P_256 as i64));
-                        PubKey::P256 {
+                        let key = PubKey::P256 {
                             x_coord: x.as_slice().try_into().context(format!(
                                 "Failed to convert x_coord to array. Len: {:?}",
                                 x.len()
@@ -76,11 +87,14 @@ impl PublicKey {
                                 "Failed to convert y_coord to array. Len: {:?}",
                                 y.len()
                             ))?,
-                        }
+                        };
+                        let pkey = Self::ec_pkey_from_bytes(SupportedEc::P256, x, y)
+                            .context("Failed to instantiate key")?;
+                        Ok(Self { key, pkey })
                     }
                     Some(coset::Algorithm::Assigned(iana::Algorithm::ES384)) => {
                         ensure!(crv == &Value::from(iana::EllipticCurve::P_384 as i64));
-                        PubKey::P384 {
+                        let key = PubKey::P384 {
                             x_coord: x.as_slice().try_into().context(format!(
                                 "Failed to convert x_coord to array. Len: {:?}",
                                 x.len()
@@ -89,57 +103,27 @@ impl PublicKey {
                                 "Failed to convert y_coord to array. Len: {:?}",
                                 y.len()
                             ))?,
-                        }
+                        };
+                        let pkey = Self::ec_pkey_from_bytes(SupportedEc::P384, x, y)
+                            .context("Failed to instantiate key")?;
+                        Ok(Self { key, pkey })
                     }
                     _ => bail!("Need to specify ES256 or ES384 in the key. Got {:?}", pkey.alg),
-                })
+                }
             }
             _ => bail!("Unexpected KeyType value: {:?}", pkey.kty),
         }
     }
 
-    fn new(key: PubKey) -> Result<Self> {
-        Ok(Self { key })
-    }
-
-    pub(super) fn algorithm(&self) -> Algorithm {
-        match &self.key {
-            PubKey::Ed25519 { .. } => Algorithm::Assigned(iana::Algorithm::EdDSA),
-            PubKey::P256 { .. } => Algorithm::Assigned(iana::Algorithm::ES256),
-            PubKey::P384 { .. } => Algorithm::Assigned(iana::Algorithm::ES384),
-        }
-    }
-
-    fn verify_ed25519(
-        pub_key: &[u8; ED25519_PUBLIC_KEY_LEN],
-        signature: &[u8],
-        message: &[u8],
-    ) -> Result<bool> {
-        ensure!(
-            signature.len() == ED25519_SIG_LEN,
-            "Unexpected signature length: {:?}",
-            signature.len()
-        );
-        let pkey = PKey::public_key_from_raw_bytes(pub_key, Id::ED25519)
-            .context("Failed to create PKey")?;
-        let mut verifier =
-            Verifier::new_without_digest(&pkey).context("Failed to create verifier")?;
-        verifier.verify_oneshot(signature, message).context("Failed to verify signature")
-    }
-
-    fn verify_ec(
-        nid: Nid,
+    fn ec_pkey_from_bytes(
+        curve: SupportedEc,
         x_coord: &[u8],
         y_coord: &[u8],
-        signature: &[u8],
-        message: &[u8],
-    ) -> Result<bool> {
-        let (coord_len, sig_len, digest) = match nid {
-            Nid::X9_62_PRIME256V1 => (P256_COORD_LEN, P256_SIG_LEN, MessageDigest::sha256()),
-            Nid::SECP384R1 => (P384_COORD_LEN, P384_SIG_LEN, MessageDigest::sha384()),
-            _ => bail!("Unsupported curve: {:?}", nid),
+    ) -> Result<PKey<Public>> {
+        let (nid, coord_len) = match curve {
+            SupportedEc::P256 => (Nid::X9_62_PRIME256V1, P256_COORD_LEN),
+            SupportedEc::P384 => (Nid::SECP384R1, P384_COORD_LEN),
         };
-        ensure!(signature.len() == sig_len, "Unexpected signature length: {:?}", signature.len());
         // Construct an X9.62 uncompressed point from the coords.
         let mut point_uncompressed = vec![0; 1 + coord_len + coord_len];
         point_uncompressed[0] = 0x04;
@@ -152,7 +136,34 @@ impl PublicKey {
             .context("Failed to create EC point")?;
         let key =
             EcKey::from_public_key(&group, &point).context("Failed to create EC public key")?;
-        let pkey = PKey::from_ec_key(key).context("Failed to create PKey")?;
+        PKey::from_ec_key(key).context("Failed to create PKey")
+    }
+
+    pub(super) fn algorithm(&self) -> Algorithm {
+        match &self.key {
+            PubKey::Ed25519 { .. } => Algorithm::Assigned(iana::Algorithm::EdDSA),
+            PubKey::P256 { .. } => Algorithm::Assigned(iana::Algorithm::ES256),
+            PubKey::P384 { .. } => Algorithm::Assigned(iana::Algorithm::ES384),
+        }
+    }
+
+    fn verify_ed25519(&self, signature: &[u8], message: &[u8]) -> Result<bool> {
+        ensure!(
+            signature.len() == ED25519_SIG_LEN,
+            "Unexpected signature length: {:?}",
+            signature.len()
+        );
+        let mut verifier =
+            Verifier::new_without_digest(&self.pkey).context("Failed to create verifier")?;
+        verifier.verify_oneshot(signature, message).context("Failed to verify signature")
+    }
+
+    fn verify_ec(&self, curve: SupportedEc, signature: &[u8], message: &[u8]) -> Result<bool> {
+        let (coord_len, sig_len, digest) = match curve {
+            SupportedEc::P256 => (P256_COORD_LEN, P256_SIG_LEN, MessageDigest::sha256()),
+            SupportedEc::P384 => (P384_COORD_LEN, P384_SIG_LEN, MessageDigest::sha384()),
+        };
+        ensure!(signature.len() == sig_len, "Unexpected signature length: {:?}", signature.len());
         // Convert the signature from raw to DER format.
         let (r, s) = signature.split_at(coord_len);
         let r = BigNum::from_slice(r).context("Failed to create BigNum for r")?;
@@ -161,7 +172,8 @@ impl PublicKey {
             EcdsaSig::from_private_components(r, s).context("Failed to create ECDSA signature")?;
         let signature = signature.to_der().context("Failed to DER encode signature")?;
         // Verify the signature against the message.
-        let mut verifier = Verifier::new(digest, &pkey).context("Failed to create verifier")?;
+        let mut verifier =
+            Verifier::new(digest, &self.pkey).context("Failed to create verifier")?;
         verifier.verify_oneshot(&signature, message).context("Failed to verify signature")
     }
 
@@ -169,15 +181,13 @@ impl PublicKey {
     /// with the PublicKey matches the signature provided.
     pub fn verify(&self, signature: &[u8], message: &[u8]) -> Result<()> {
         let verified = match &self.key {
-            PubKey::Ed25519 { pub_key } => Self::verify_ed25519(pub_key, signature, message)?,
-            PubKey::P256 { x_coord, y_coord } => {
-                Self::verify_ec(Nid::X9_62_PRIME256V1, x_coord, y_coord, signature, message)
-                    .context("Failed to verify p256 signature")?
-            }
-            PubKey::P384 { x_coord, y_coord } => {
-                Self::verify_ec(Nid::SECP384R1, x_coord, y_coord, signature, message)
-                    .context("Failed to verify p384 signature")?
-            }
+            PubKey::Ed25519 { .. } => self.verify_ed25519(signature, message)?,
+            PubKey::P256 { .. } => self
+                .verify_ec(SupportedEc::P256, signature, message)
+                .context("Failed to verify p256 signature")?,
+            PubKey::P384 { .. } => self
+                .verify_ec(SupportedEc::P384, signature, message)
+                .context("Failed to verify p384 signature")?,
         };
         ensure!(verified, "Signature verification failed.");
         Ok(())
