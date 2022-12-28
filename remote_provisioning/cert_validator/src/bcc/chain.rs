@@ -100,8 +100,8 @@ impl Chain {
 
 impl Display for Chain {
     fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
-        writeln!(f, "Root public key: {}", self.root_public_key)?;
-        writeln!(f)?;
+        writeln!(f, "Root public key:")?;
+        writeln!(f, "{}", self.root_public_key.to_pem())?;
         for (i, payload) in self.payloads.iter().enumerate() {
             writeln!(f, "Cert {}:", i)?;
             writeln!(f, "{}", payload)?;
