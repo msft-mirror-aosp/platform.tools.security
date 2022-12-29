@@ -9,8 +9,8 @@ rust_defaults {
         "libanyhow",
         "libthiserror",
         "libciborium",
-        "libciborium_io",
         "libcoset",
+        "libhex",
         "libopenssl",
     ],
 }

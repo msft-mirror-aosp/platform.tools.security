@@ -1,6 +1,5 @@
 //! This module wraps the certificate validation functions intended for BccEntry.
 
-use crate::display::write_bytes_field;
 use crate::publickey::PublicKey;
 use std::fmt::{self, Display, Formatter};
 
@@ -37,16 +36,16 @@ impl Display for Payload {
         writeln!(f, "Subject: {}", self.subject)?;
         writeln!(f, "Mode: {:?}", self.mode)?;
         if let Some(code_desc) = &self.code_desc {
-            write_bytes_field(f, "Code Desc", code_desc)?;
+            writeln!(f, "Code Desc: {}", hex::encode(code_desc))?;
         }
-        write_bytes_field(f, "Code Hash", &self.code_hash)?;
+        writeln!(f, "Code Hash: {}", hex::encode(&self.code_hash))?;
         if let Some(config_hash) = &self.config_hash {
-            write_bytes_field(f, "Config Hash", config_hash)?;
+            writeln!(f, "Config Hash: {}", hex::encode(config_hash))?;
         }
         if let Some(authority_desc) = &self.authority_desc {
-            write_bytes_field(f, "Authority Desc", authority_desc)?;
+            writeln!(f, "Authority Desc: {}", hex::encode(authority_desc))?;
         }
-        write_bytes_field(f, "Authority Hash", &self.authority_hash)?;
+        writeln!(f, "Authority Hash: {}", hex::encode(&self.authority_hash))?;
         writeln!(f, "Config Desc:")?;
         write!(f, "{}", &self.config_desc)?;
         Ok(())
