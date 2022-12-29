@@ -79,10 +79,10 @@ impl Payload {
     }
 }
 
-struct PayloadFields {
-    issuer: String,
-    subject: String,
-    subject_public_key: PublicKey,
+pub(super) struct PayloadFields {
+    pub(super) issuer: String,
+    pub(super) subject: String,
+    pub(super) subject_public_key: PublicKey,
     mode: Option<DiceMode>,
     code_desc: Option<Vec<u8>>,
     code_hash: Option<Vec<u8>>,
@@ -93,7 +93,7 @@ struct PayloadFields {
 }
 
 impl PayloadFields {
-    fn from_cbor(bytes: &[u8]) -> Result<Self> {
+    pub(super) fn from_cbor(bytes: &[u8]) -> Result<Self> {
         let mut issuer = FieldValue::new("issuer");
         let mut subject = FieldValue::new("subject");
         let mut subject_public_key = FieldValue::new("subject public key");
