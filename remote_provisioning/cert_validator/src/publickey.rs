@@ -2,12 +2,8 @@
 //! PubKeyECDSA384) used in the BccPayload. The key itself is stored as a
 //! simple byte array in a vector.
 
-use anyhow::{anyhow, bail, ensure, Context, Result};
-use coset::cbor::value::Value;
-use coset::iana::{self, EnumI64};
-use coset::{Algorithm, CoseKey, KeyOperation, KeyType, Label};
+use anyhow::{ensure, Context, Result};
 use openssl::bn::BigNum;
-use openssl::ec::{EcGroup, EcKey};
 use openssl::ecdsa::EcdsaSig;
 use openssl::hash::MessageDigest;
 use openssl::nid::Nid;
@@ -16,36 +12,16 @@ use openssl::sign::Verifier;
 use std::error::Error;
 use std::fmt;
 
-/// Get the value corresponding to the provided label within the supplied CoseKey or error if it's
-/// not present.
-fn get_label_value(key: &CoseKey, label: Label) -> Result<&Value> {
-    Ok(&key
-        .params
-        .iter()
-        .find(|(k, _)| k == &label)
-        .ok_or_else(|| anyhow!("Label {:?} not found", label))?
-        .1)
-}
-
-/// Get the byte string for the corresponding label within the key if the label exists and the
-/// value is actually a byte array.
-fn get_label_value_as_bytes(key: &CoseKey, label: Label) -> Result<&[u8]> {
-    get_label_value(key, label)?
-        .as_bytes()
-        .ok_or_else(|| anyhow!("Value not a bstr."))
-        .map(Vec::as_slice)
-}
-
 /// Enumeration of the kinds of key that are supported.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Kind {
+pub(crate) enum Kind {
     Ed25519,
     Ec(EcKind),
 }
 
 /// Enumeration of the kinds of elliptic curve keys that are supported.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum EcKind {
+pub(crate) enum EcKind {
     P256,
     P384,
 }
@@ -57,65 +33,8 @@ pub struct PublicKey {
 }
 
 impl PublicKey {
-    pub(super) fn from_cose_key(pkey: &CoseKey) -> Result<Self> {
-        if !pkey.key_ops.is_empty() {
-            ensure!(pkey.key_ops.contains(&KeyOperation::Assigned(iana::KeyOperation::Verify)));
-        }
-        match pkey.kty {
-            KeyType::Assigned(iana::KeyType::OKP) => Self::from_cose_okp_key(pkey),
-            KeyType::Assigned(iana::KeyType::EC2) => Self::from_cose_ec2_key(pkey),
-            _ => bail!("Unexpected KeyType value: {:?}", pkey.kty),
-        }
-    }
-
-    fn from_cose_okp_key(pkey: &CoseKey) -> Result<Self> {
-        ensure!(pkey.kty == KeyType::Assigned(iana::KeyType::OKP));
-        ensure!(pkey.alg == Some(Algorithm::Assigned(iana::Algorithm::EdDSA)));
-        let crv = get_label_value(pkey, Label::Int(iana::OkpKeyParameter::Crv.to_i64()))?;
-        let x = get_label_value_as_bytes(pkey, Label::Int(iana::OkpKeyParameter::X.to_i64()))?;
-        ensure!(crv == &Value::from(iana::EllipticCurve::Ed25519.to_i64()));
-        let pkey =
-            PKey::public_key_from_raw_bytes(x, Id::ED25519).context("Failed to instantiate key")?;
-        Ok(Self { kind: Kind::Ed25519, pkey })
-    }
-
-    fn from_cose_ec2_key(pkey: &CoseKey) -> Result<Self> {
-        ensure!(pkey.kty == KeyType::Assigned(iana::KeyType::EC2));
-        let crv = get_label_value(pkey, Label::Int(iana::Ec2KeyParameter::Crv.to_i64()))?;
-        let x = get_label_value_as_bytes(pkey, Label::Int(iana::Ec2KeyParameter::X.to_i64()))?;
-        let y = get_label_value_as_bytes(pkey, Label::Int(iana::Ec2KeyParameter::Y.to_i64()))?;
-        match pkey.alg {
-            Some(Algorithm::Assigned(iana::Algorithm::ES256)) => {
-                ensure!(crv == &Value::from(iana::EllipticCurve::P_256.to_i64()));
-                let pkey = Self::ec_pkey_from_bytes(Nid::X9_62_PRIME256V1, x, y)
-                    .context("Failed to instantiate key")?;
-                Ok(Self { kind: Kind::Ec(EcKind::P256), pkey })
-            }
-            Some(Algorithm::Assigned(iana::Algorithm::ES384)) => {
-                ensure!(crv == &Value::from(iana::EllipticCurve::P_384.to_i64()));
-                let pkey = Self::ec_pkey_from_bytes(Nid::SECP384R1, x, y)
-                    .context("Failed to instantiate key")?;
-                Ok(Self { kind: Kind::Ec(EcKind::P384), pkey })
-            }
-            _ => bail!("Need to specify ES256 or ES384 in the key. Got {:?}", pkey.alg),
-        }
-    }
-
-    fn ec_pkey_from_bytes(nid: Nid, x_coord: &[u8], y_coord: &[u8]) -> Result<PKey<Public>> {
-        let group = EcGroup::from_curve_name(nid).context("Failed to construct curve group")?;
-        let x = BigNum::from_slice(x_coord).context("Failed to create x coord")?;
-        let y = BigNum::from_slice(y_coord).context("Failed to create y coord")?;
-        let key = EcKey::from_public_key_affine_coordinates(&group, &x, &y)
-            .context("Failed to create EC public key")?;
-        PKey::from_ec_key(key).context("Failed to create PKey")
-    }
-
-    pub(super) fn algorithm(&self) -> Algorithm {
-        match self.kind {
-            Kind::Ed25519 => Algorithm::Assigned(iana::Algorithm::EdDSA),
-            Kind::Ec(EcKind::P256) => Algorithm::Assigned(iana::Algorithm::ES256),
-            Kind::Ec(EcKind::P384) => Algorithm::Assigned(iana::Algorithm::ES384),
-        }
+    pub(crate) fn kind(&self) -> Kind {
+        self.kind
     }
 
     fn verify_ed25519(&self, signature: &[u8], message: &[u8]) -> Result<bool> {
