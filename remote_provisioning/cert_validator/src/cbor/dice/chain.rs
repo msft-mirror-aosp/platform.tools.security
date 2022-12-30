@@ -2,7 +2,7 @@ use crate::bcc::entry::Payload;
 use crate::bcc::Chain;
 use crate::cbor::{cose_error, value_from_bytes};
 use crate::publickey::PublicKey;
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{bail, Context, Result};
 use ciborium::value::Value;
 use coset::{cbor::value::Value::Array, AsCborValue, CoseKey};
 
@@ -32,13 +32,13 @@ impl Chain {
         let root_public_key = CoseKey::from_cbor_value(it.next().unwrap())
             .map_err(cose_error)
             .context("Error parsing root public key CBOR")?;
+
         let root_public_key =
             PublicKey::from_cose_key(&root_public_key).context("Invalid root key")?;
-
         let payloads =
             check_sign1_chain(it, Some(&root_public_key)).context("Invalid certificate chain")?;
 
-        Ok(Self::new(root_public_key, payloads))
+        Self::validate(root_public_key, payloads).context("Building chain")
     }
 }
 
@@ -65,8 +65,6 @@ fn check_sign1_chain<T: IntoIterator<Item = Value>>(
         expected_issuer = Some(previous.subject());
         previous_public_key = Some(previous.subject_public_key());
     }
-
-    ensure!(!payloads.is_empty(), "Cert chain is empty.");
 
     Ok(payloads)
 }
