@@ -24,18 +24,29 @@ const COMPONENT_NAME: i64 = -70002;
 const COMPONENT_VERSION: i64 = -70003;
 const RESETTABLE: i64 = -70004;
 
-impl Payload {
-    pub(super) fn from_cbor_sign1(
-        public_key: Option<&PublicKey>,
-        expected_issuer: Option<&str>,
-        cbor: Value,
-    ) -> Result<Self> {
-        let entry = CoseSign1::from_cbor_value(cbor)
+pub(super) struct Entry {
+    payload: Vec<u8>,
+}
+
+impl Entry {
+    pub(super) fn verify_cbor_value(cbor: Value, key: &PublicKey) -> Result<Self> {
+        let sign1 = CoseSign1::from_cbor_value(cbor)
             .map_err(cose_error)
             .context("Given CBOR does not appear to be a COSE_sign1")?;
-        let payload = payload_from_sign1(public_key, expected_issuer, &entry)
-            .context("Unable to extract payload from COSE_sign1")?;
-        Ok(payload)
+        let algorithm = Algorithm::Assigned(key.iana_algorithm());
+        check_protected_header(&algorithm, &sign1.protected.header)
+            .context("Validation of bcc entry protected header failed.")?;
+        sign1
+            .verify_signature(b"", |s, m| key.verify(s, m))
+            .context("public key cannot verify cose_sign1 cert")?;
+        match sign1.payload {
+            None => bail!("Missing payload"),
+            Some(payload) => Ok(Self { payload }),
+        }
+    }
+
+    pub(super) fn payload(&self) -> &[u8] {
+        &self.payload
     }
 }
 
@@ -50,121 +61,131 @@ fn check_protected_header(alg: &Algorithm, header: &Header) -> Result<()> {
     Ok(())
 }
 
-fn payload_from_sign1(
-    pkey: Option<&PublicKey>,
-    expected_issuer: Option<&str>,
-    sign1: &CoseSign1,
-) -> Result<Payload> {
-    if let Some(pkey) = pkey {
-        check_protected_header(
-            &Algorithm::Assigned(pkey.iana_algorithm()),
-            &sign1.protected.header,
-        )
-        .context("Validation of bcc entry protected header failed.")?;
-        sign1
-            .verify_signature(b"", |s, m| pkey.verify(s, m))
-            .context("public key cannot verify cose_sign1 cert")?;
+impl Payload {
+    pub(super) fn from_cbor(bytes: &[u8]) -> Result<Self> {
+        let f = PayloadFields::from_cbor(bytes)?;
+        PayloadBuilder::with_subject_public_key(f.subject_public_key)
+            .issuer(f.issuer)
+            .subject(f.subject)
+            .mode(f.mode.ok_or_else(|| anyhow!("mode required"))?)
+            .code_desc(f.code_desc)
+            .code_hash(f.code_hash.ok_or_else(|| anyhow!("code hash required"))?)
+            .config_desc(f.config_desc.ok_or_else(|| anyhow!("config desc required"))?)
+            .config_hash(f.config_hash)
+            .authority_desc(f.authority_desc)
+            .authority_hash(f.authority_hash.ok_or_else(|| anyhow!("authority hash required"))?)
+            .build()
+            .context("building payload")
     }
-
-    let bytes = sign1.payload.as_ref().ok_or_else(|| anyhow!("no payload"))?;
-    let payload = payload_from_slice(bytes.as_slice())?;
-    if let Some(expected_issuer) = expected_issuer {
-        ensure!(
-            payload.issuer() == expected_issuer,
-            "COSE_sign1's issuer ({}) does not match the subject of the previous payload in \
-            the chain ({}).",
-            payload.issuer(),
-            expected_issuer
-        );
-    }
-    Ok(payload)
 }
 
-fn payload_from_slice(bytes: &[u8]) -> Result<Payload> {
-    let entries = cbor_map_from_slice(bytes)?;
+struct PayloadFields {
+    issuer: String,
+    subject: String,
+    subject_public_key: PublicKey,
+    mode: Option<DiceMode>,
+    code_desc: Option<Vec<u8>>,
+    code_hash: Option<Vec<u8>>,
+    config_desc: Option<ConfigDesc>,
+    config_hash: Option<Vec<u8>>,
+    authority_desc: Option<Vec<u8>>,
+    authority_hash: Option<Vec<u8>>,
+}
 
-    let mut issuer = FieldValue::new("issuer");
-    let mut subject = FieldValue::new("subject");
-    let mut subject_public_key = FieldValue::new("subject public key");
-    let mut mode = FieldValue::new("mode");
-    let mut code_desc = FieldValue::new("code desc");
-    let mut code_hash = FieldValue::new("code hash");
-    let mut config_desc = FieldValue::new("config desc");
-    let mut config_hash = FieldValue::new("config hash");
-    let mut authority_desc = FieldValue::new("authority desc");
-    let mut authority_hash = FieldValue::new("authority hash");
-    let mut key_usage = FieldValue::new("key usage");
+impl PayloadFields {
+    fn from_cbor(bytes: &[u8]) -> Result<Self> {
+        let mut issuer = FieldValue::new("issuer");
+        let mut subject = FieldValue::new("subject");
+        let mut subject_public_key = FieldValue::new("subject public key");
+        let mut mode = FieldValue::new("mode");
+        let mut code_desc = FieldValue::new("code desc");
+        let mut code_hash = FieldValue::new("code hash");
+        let mut config_desc = FieldValue::new("config desc");
+        let mut config_hash = FieldValue::new("config hash");
+        let mut authority_desc = FieldValue::new("authority desc");
+        let mut authority_hash = FieldValue::new("authority hash");
+        let mut key_usage = FieldValue::new("key usage");
 
-    for (key, value) in entries.into_iter() {
-        if let Some(Ok(key)) = key.as_integer().map(TryInto::try_into) {
-            let field = match key {
-                ISS => &mut issuer,
-                SUB => &mut subject,
-                SUBJECT_PUBLIC_KEY => &mut subject_public_key,
-                MODE => &mut mode,
-                CODE_DESC => &mut code_desc,
-                CODE_HASH => &mut code_hash,
-                CONFIG_DESC => &mut config_desc,
-                CONFIG_HASH => &mut config_hash,
-                AUTHORITY_DESC => &mut authority_desc,
-                AUTHORITY_HASH => &mut authority_hash,
-                KEY_USAGE => &mut key_usage,
-                _ => bail!("Unknown key {}", key),
-            };
-            field.set(value)?;
-        } else {
-            bail!("Invalid key: {:?}", key);
+        let entries = cbor_map_from_slice(bytes)?;
+        for (key, value) in entries.into_iter() {
+            if let Some(Ok(key)) = key.as_integer().map(TryInto::try_into) {
+                let field = match key {
+                    ISS => &mut issuer,
+                    SUB => &mut subject,
+                    SUBJECT_PUBLIC_KEY => &mut subject_public_key,
+                    MODE => &mut mode,
+                    CODE_DESC => &mut code_desc,
+                    CODE_HASH => &mut code_hash,
+                    CONFIG_DESC => &mut config_desc,
+                    CONFIG_HASH => &mut config_hash,
+                    AUTHORITY_DESC => &mut authority_desc,
+                    AUTHORITY_HASH => &mut authority_hash,
+                    KEY_USAGE => &mut key_usage,
+                    _ => bail!("Unknown key {}", key),
+                };
+                field.set(value)?;
+            } else {
+                bail!("Invalid key: {:?}", key);
+            }
         }
+
+        validate_key_usage(key_usage)?;
+
+        Ok(Self {
+            issuer: issuer.into_string().context("issuer")?,
+            subject: subject.into_string().context("subject")?,
+            subject_public_key: validate_subject_public_key(subject_public_key)?,
+            mode: validate_mode(mode).context("mode")?,
+            code_desc: code_desc.into_optional_bytes().context("code descriptor")?,
+            code_hash: code_hash.into_optional_bytes().context("code hash")?,
+            config_desc: validate_config_desc(config_desc).context("config descriptor")?,
+            config_hash: config_hash.into_optional_bytes().context("config hash")?,
+            authority_desc: authority_desc.into_optional_bytes().context("authority descriptor")?,
+            authority_hash: authority_hash.into_optional_bytes().context("authority hash")?,
+        })
     }
+}
 
-    let issuer = issuer.into_string().context("Issuer must be a string")?;
-    let subject = subject.into_string().context("Subject must be a string")?;
-    let subject_public_key =
-        subject_public_key.into_bytes().context("Subject public key must be bytes")?;
-    let mode = mode.into_bytes().context("Mode must be bytes")?;
-    let code_desc = code_desc.into_optional_bytes().context("Code descriptor must be bytes")?;
-    let code_hash = code_hash.into_bytes().context("Code hash must be bytes")?;
-    let config_desc = config_desc.into_bytes().context("Config descriptor must be bytes")?;
-    let config_hash = config_hash.into_optional_bytes().context("Config hash must be bytes")?;
-    let authority_desc =
-        authority_desc.into_optional_bytes().context("Authority descriptor must be bytes")?;
-    let authority_hash = authority_hash.into_bytes().context("Authority hash must be bytes")?;
-    let key_usage = key_usage.into_bytes().context("Key usage must be bytes")?;
+fn validate_key_usage(key_usage: FieldValue) -> Result<()> {
+    let key_usage = key_usage.into_bytes().context("key usage")?;
+    if key_usage.len() != 1 || key_usage[0] != 0x20 {
+        bail!("key usage must be keyCertSign");
+    };
+    Ok(())
+}
 
+fn validate_subject_public_key(subject_public_key: FieldValue) -> Result<PublicKey> {
+    let subject_public_key = subject_public_key.into_bytes().context("Subject public")?;
     let subject_public_key = CoseKey::from_slice(&subject_public_key)
         .map_err(cose_error)
-        .context("Error parsing subject public key from bytes")?;
-    let subject_public_key = PublicKey::from_cose_key(&subject_public_key)
-        .context("Error parsing subject public key from COSE_key")?;
-    if mode.len() != 1 {
-        bail!("Expected mode to be a single byte, actual byte count: {}", mode.len())
-    };
-    let mode = match mode[0] {
-        1 => DiceMode::Normal,
-        2 => DiceMode::Debug,
-        3 => DiceMode::Recovery,
-        _ => DiceMode::NotConfigured,
-    };
+        .context("parsing subject public key from bytes")?;
+    PublicKey::from_cose_key(&subject_public_key)
+        .context("parsing subject public key from COSE_key")
+}
 
-    let config_desc = config_desc_from_slice(&config_desc)
-        .context("Error parsing config descriptor from bytes")?;
+fn validate_mode(mode: FieldValue) -> Result<Option<DiceMode>> {
+    let mode = mode.into_optional_bytes()?;
+    mode.map(|mode| {
+        if mode.len() != 1 {
+            bail!("Expected mode to be a single byte, actual byte count: {}", mode.len())
+        };
+        Ok(match mode[0] {
+            1 => DiceMode::Normal,
+            2 => DiceMode::Debug,
+            3 => DiceMode::Recovery,
+            _ => DiceMode::NotConfigured,
+        })
+    })
+    .transpose()
+}
 
-    if key_usage.len() != 1 || key_usage[0] != 0x20 {
-        bail!("key usage must be keyCertSign")
-    };
-
-    PayloadBuilder::with_subject_public_key(subject_public_key)
-        .issuer(issuer)
-        .subject(subject)
-        .mode(mode)
-        .code_desc(code_desc)
-        .code_hash(code_hash)
-        .config_desc(config_desc)
-        .config_hash(config_hash)
-        .authority_desc(authority_desc)
-        .authority_hash(authority_hash)
-        .build()
-        .context("building payload")
+fn validate_config_desc(config_desc: FieldValue) -> Result<Option<ConfigDesc>> {
+    let config_desc = config_desc.into_optional_bytes()?;
+    config_desc
+        .map(|config_desc| {
+            config_desc_from_slice(&config_desc).context("parsing config descriptor")
+        })
+        .transpose()
 }
 
 fn cbor_map_from_slice(bytes: &[u8]) -> Result<Vec<(Value, Value)>> {
