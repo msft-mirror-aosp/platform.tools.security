@@ -113,9 +113,9 @@ impl Payload {
         if let Some(pkey) = pkey {
             check_protected_header(&pkey.algorithm(), &sign1.protected.header)
                 .context("Validation of bcc entry protected header failed.")?;
-            sign1.verify_signature(b"", |s, m| pkey.verify(s, m)).with_context(|| {
-                format!("public key {} incorrectly signs the given cose_sign1 cert.", pkey)
-            })?;
+            sign1
+                .verify_signature(b"", |s, m| pkey.verify(s, m))
+                .context("public key cannot verify cose_sign1 cert")?;
         }
 
         let bytes = sign1.payload.as_ref().ok_or_else(|| anyhow!("no payload"))?;
