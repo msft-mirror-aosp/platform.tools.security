@@ -2,11 +2,11 @@
 //! PubKeyECDSA384) used in the BccPayload. The key itself is stored as a
 //! simple byte array in a vector.
 
-use crate::bcc::{get_label_value, get_label_value_as_bytes};
 use crate::display::write_bytes_in_hex;
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{anyhow, bail, ensure, Context, Result};
 use coset::cbor::value::Value;
-use coset::{iana, Algorithm, CoseKey};
+use coset::iana::{self, EnumI64};
+use coset::{Algorithm, CoseKey, KeyOperation, KeyType, Label};
 use openssl::bn::{BigNum, BigNumContext};
 use openssl::ec::{EcGroup, EcKey, EcPoint};
 use openssl::ecdsa::EcdsaSig;
@@ -29,6 +29,26 @@ pub const P384_COORD_LEN: usize = 48;
 /// Length of a P384 signature.
 pub const P384_SIG_LEN: usize = 96;
 
+/// Get the value corresponding to the provided label within the supplied CoseKey or error if it's
+/// not present.
+fn get_label_value(key: &CoseKey, label: Label) -> Result<&Value> {
+    Ok(&key
+        .params
+        .iter()
+        .find(|(k, _)| k == &label)
+        .ok_or_else(|| anyhow!("Label {:?} not found", label))?
+        .1)
+}
+
+/// Get the byte string for the corresponding label within the key if the label exists and the
+/// value is actually a byte array.
+fn get_label_value_as_bytes(key: &CoseKey, label: Label) -> Result<&[u8]> {
+    get_label_value(key, label)?
+        .as_bytes()
+        .ok_or_else(|| anyhow!("Value not a bstr."))
+        .map(Vec::as_slice)
+}
+
 /// Enumeration of the elliptic curve algorithms that are supported.
 enum SupportedEc {
     P256,
@@ -50,26 +70,23 @@ pub struct PublicKey {
 impl PublicKey {
     pub(super) fn from_cose_key(pkey: &CoseKey) -> Result<Self> {
         if !pkey.key_ops.is_empty() {
-            ensure!(pkey
-                .key_ops
-                .contains(&coset::KeyOperation::Assigned(iana::KeyOperation::Verify)));
+            ensure!(pkey.key_ops.contains(&KeyOperation::Assigned(iana::KeyOperation::Verify)));
         }
         match pkey.kty {
-            coset::KeyType::Assigned(iana::KeyType::OKP) => Self::from_cose_okp_key(pkey),
-            coset::KeyType::Assigned(iana::KeyType::EC2) => Self::from_cose_ec2_key(pkey),
+            KeyType::Assigned(iana::KeyType::OKP) => Self::from_cose_okp_key(pkey),
+            KeyType::Assigned(iana::KeyType::EC2) => Self::from_cose_ec2_key(pkey),
             _ => bail!("Unexpected KeyType value: {:?}", pkey.kty),
         }
     }
 
     fn from_cose_okp_key(pkey: &CoseKey) -> Result<Self> {
-        ensure!(pkey.kty == coset::KeyType::Assigned(iana::KeyType::OKP));
-        ensure!(pkey.alg == Some(coset::Algorithm::Assigned(iana::Algorithm::EdDSA)));
-        let crv = get_label_value(pkey, iana::OkpKeyParameter::Crv as i64)?;
-        let x = get_label_value_as_bytes(pkey, iana::OkpKeyParameter::X as i64)?;
-        ensure!(crv == &Value::from(iana::EllipticCurve::Ed25519 as i64));
+        ensure!(pkey.kty == KeyType::Assigned(iana::KeyType::OKP));
+        ensure!(pkey.alg == Some(Algorithm::Assigned(iana::Algorithm::EdDSA)));
+        let crv = get_label_value(pkey, Label::Int(iana::OkpKeyParameter::Crv.to_i64()))?;
+        let x = get_label_value_as_bytes(pkey, Label::Int(iana::OkpKeyParameter::X.to_i64()))?;
+        ensure!(crv == &Value::from(iana::EllipticCurve::Ed25519.to_i64()));
         let key = PubKey::Ed25519 {
             pub_key: x
-                .as_slice()
                 .try_into()
                 .context(format!("Failed to convert x_coord to array. Len: {:?}", x.len()))?,
         };
@@ -79,19 +96,19 @@ impl PublicKey {
     }
 
     fn from_cose_ec2_key(pkey: &CoseKey) -> Result<Self> {
-        ensure!(pkey.kty == coset::KeyType::Assigned(iana::KeyType::EC2));
-        let crv = get_label_value(pkey, iana::Ec2KeyParameter::Crv as i64)?;
-        let x = get_label_value_as_bytes(pkey, iana::Ec2KeyParameter::X as i64)?;
-        let y = get_label_value_as_bytes(pkey, iana::Ec2KeyParameter::Y as i64)?;
+        ensure!(pkey.kty == KeyType::Assigned(iana::KeyType::EC2));
+        let crv = get_label_value(pkey, Label::Int(iana::Ec2KeyParameter::Crv.to_i64()))?;
+        let x = get_label_value_as_bytes(pkey, Label::Int(iana::Ec2KeyParameter::X.to_i64()))?;
+        let y = get_label_value_as_bytes(pkey, Label::Int(iana::Ec2KeyParameter::Y.to_i64()))?;
         match pkey.alg {
-            Some(coset::Algorithm::Assigned(iana::Algorithm::ES256)) => {
-                ensure!(crv == &Value::from(iana::EllipticCurve::P_256 as i64));
+            Some(Algorithm::Assigned(iana::Algorithm::ES256)) => {
+                ensure!(crv == &Value::from(iana::EllipticCurve::P_256.to_i64()));
                 let key = PubKey::P256 {
-                    x_coord: x.as_slice().try_into().context(format!(
+                    x_coord: x.try_into().context(format!(
                         "Failed to convert x_coord to array. Len: {:?}",
                         x.len()
                     ))?,
-                    y_coord: y.as_slice().try_into().context(format!(
+                    y_coord: y.try_into().context(format!(
                         "Failed to convert y_coord to array. Len: {:?}",
                         y.len()
                     ))?,
@@ -100,14 +117,14 @@ impl PublicKey {
                     .context("Failed to instantiate key")?;
                 Ok(Self { key, pkey })
             }
-            Some(coset::Algorithm::Assigned(iana::Algorithm::ES384)) => {
-                ensure!(crv == &Value::from(iana::EllipticCurve::P_384 as i64));
+            Some(Algorithm::Assigned(iana::Algorithm::ES384)) => {
+                ensure!(crv == &Value::from(iana::EllipticCurve::P_384.to_i64()));
                 let key = PubKey::P384 {
-                    x_coord: x.as_slice().try_into().context(format!(
+                    x_coord: x.try_into().context(format!(
                         "Failed to convert x_coord to array. Len: {:?}",
                         x.len()
                     ))?,
-                    y_coord: y.as_slice().try_into().context(format!(
+                    y_coord: y.try_into().context(format!(
                         "Failed to convert y_coord to array. Len: {:?}",
                         y.len()
                     ))?,
