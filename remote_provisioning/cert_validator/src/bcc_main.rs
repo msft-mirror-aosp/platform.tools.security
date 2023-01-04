@@ -43,3 +43,14 @@ fn main() -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn verify_command() {
+        Args::command().debug_assert();
+    }
+}
