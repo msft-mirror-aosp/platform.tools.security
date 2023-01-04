@@ -48,70 +48,75 @@ pub struct PublicKey {
 }
 
 impl PublicKey {
-    /// Extract the PublicKey from Subject Public Key.
-    /// (CertificateRequest.BccEntry.payload[SubjectPublicKey].X)
     pub(super) fn from_cose_key(pkey: &CoseKey) -> Result<Self> {
         if !pkey.key_ops.is_empty() {
             ensure!(pkey
                 .key_ops
                 .contains(&coset::KeyOperation::Assigned(iana::KeyOperation::Verify)));
         }
-        let x = get_label_value_as_bytes(pkey, iana::OkpKeyParameter::X as i64)?;
         match pkey.kty {
-            coset::KeyType::Assigned(iana::KeyType::OKP) => {
-                ensure!(pkey.alg == Some(coset::Algorithm::Assigned(iana::Algorithm::EdDSA)));
-                let crv = get_label_value(pkey, iana::OkpKeyParameter::Crv as i64)?;
-                ensure!(crv == &Value::from(iana::EllipticCurve::Ed25519 as i64));
-                let key = PubKey::Ed25519 {
-                    pub_key: x.as_slice().try_into().context(format!(
+            coset::KeyType::Assigned(iana::KeyType::OKP) => Self::from_cose_okp_key(pkey),
+            coset::KeyType::Assigned(iana::KeyType::EC2) => Self::from_cose_ec2_key(pkey),
+            _ => bail!("Unexpected KeyType value: {:?}", pkey.kty),
+        }
+    }
+
+    fn from_cose_okp_key(pkey: &CoseKey) -> Result<Self> {
+        ensure!(pkey.kty == coset::KeyType::Assigned(iana::KeyType::OKP));
+        ensure!(pkey.alg == Some(coset::Algorithm::Assigned(iana::Algorithm::EdDSA)));
+        let crv = get_label_value(pkey, iana::OkpKeyParameter::Crv as i64)?;
+        let x = get_label_value_as_bytes(pkey, iana::OkpKeyParameter::X as i64)?;
+        ensure!(crv == &Value::from(iana::EllipticCurve::Ed25519 as i64));
+        let key = PubKey::Ed25519 {
+            pub_key: x
+                .as_slice()
+                .try_into()
+                .context(format!("Failed to convert x_coord to array. Len: {:?}", x.len()))?,
+        };
+        let pkey =
+            PKey::public_key_from_raw_bytes(x, Id::ED25519).context("Failed to instantiate key")?;
+        Ok(Self { key, pkey })
+    }
+
+    fn from_cose_ec2_key(pkey: &CoseKey) -> Result<Self> {
+        ensure!(pkey.kty == coset::KeyType::Assigned(iana::KeyType::EC2));
+        let crv = get_label_value(pkey, iana::Ec2KeyParameter::Crv as i64)?;
+        let x = get_label_value_as_bytes(pkey, iana::Ec2KeyParameter::X as i64)?;
+        let y = get_label_value_as_bytes(pkey, iana::Ec2KeyParameter::Y as i64)?;
+        match pkey.alg {
+            Some(coset::Algorithm::Assigned(iana::Algorithm::ES256)) => {
+                ensure!(crv == &Value::from(iana::EllipticCurve::P_256 as i64));
+                let key = PubKey::P256 {
+                    x_coord: x.as_slice().try_into().context(format!(
                         "Failed to convert x_coord to array. Len: {:?}",
                         x.len()
                     ))?,
+                    y_coord: y.as_slice().try_into().context(format!(
+                        "Failed to convert y_coord to array. Len: {:?}",
+                        y.len()
+                    ))?,
                 };
-                let pkey = PKey::public_key_from_raw_bytes(x, Id::ED25519)
+                let pkey = Self::ec_pkey_from_bytes(SupportedEc::P256, x, y)
                     .context("Failed to instantiate key")?;
                 Ok(Self { key, pkey })
             }
-            coset::KeyType::Assigned(iana::KeyType::EC2) => {
-                let crv = get_label_value(pkey, iana::Ec2KeyParameter::Crv as i64)?;
-                let y = get_label_value_as_bytes(pkey, iana::Ec2KeyParameter::Y as i64)?;
-                match pkey.alg {
-                    Some(coset::Algorithm::Assigned(iana::Algorithm::ES256)) => {
-                        ensure!(crv == &Value::from(iana::EllipticCurve::P_256 as i64));
-                        let key = PubKey::P256 {
-                            x_coord: x.as_slice().try_into().context(format!(
-                                "Failed to convert x_coord to array. Len: {:?}",
-                                x.len()
-                            ))?,
-                            y_coord: y.as_slice().try_into().context(format!(
-                                "Failed to convert y_coord to array. Len: {:?}",
-                                y.len()
-                            ))?,
-                        };
-                        let pkey = Self::ec_pkey_from_bytes(SupportedEc::P256, x, y)
-                            .context("Failed to instantiate key")?;
-                        Ok(Self { key, pkey })
-                    }
-                    Some(coset::Algorithm::Assigned(iana::Algorithm::ES384)) => {
-                        ensure!(crv == &Value::from(iana::EllipticCurve::P_384 as i64));
-                        let key = PubKey::P384 {
-                            x_coord: x.as_slice().try_into().context(format!(
-                                "Failed to convert x_coord to array. Len: {:?}",
-                                x.len()
-                            ))?,
-                            y_coord: y.as_slice().try_into().context(format!(
-                                "Failed to convert y_coord to array. Len: {:?}",
-                                y.len()
-                            ))?,
-                        };
-                        let pkey = Self::ec_pkey_from_bytes(SupportedEc::P384, x, y)
-                            .context("Failed to instantiate key")?;
-                        Ok(Self { key, pkey })
-                    }
-                    _ => bail!("Need to specify ES256 or ES384 in the key. Got {:?}", pkey.alg),
-                }
+            Some(coset::Algorithm::Assigned(iana::Algorithm::ES384)) => {
+                ensure!(crv == &Value::from(iana::EllipticCurve::P_384 as i64));
+                let key = PubKey::P384 {
+                    x_coord: x.as_slice().try_into().context(format!(
+                        "Failed to convert x_coord to array. Len: {:?}",
+                        x.len()
+                    ))?,
+                    y_coord: y.as_slice().try_into().context(format!(
+                        "Failed to convert y_coord to array. Len: {:?}",
+                        y.len()
+                    ))?,
+                };
+                let pkey = Self::ec_pkey_from_bytes(SupportedEc::P384, x, y)
+                    .context("Failed to instantiate key")?;
+                Ok(Self { key, pkey })
             }
-            _ => bail!("Unexpected KeyType value: {:?}", pkey.kty),
+            _ => bail!("Need to specify ES256 or ES384 in the key. Got {:?}", pkey.alg),
         }
     }
 
