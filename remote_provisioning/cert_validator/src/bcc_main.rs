@@ -3,31 +3,43 @@
 //! certificates are valid and that any given cert in the series correctly
 //! signs the next.
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 use cert_request_validator::bcc;
-use clap::{Arg, SubCommand};
+use clap::{Parser, Subcommand};
 use std::fs;
 
+#[derive(Parser)]
+/// A tool for handling DICE chains that follow Android's Boot Certificate Chain (BCC)
+/// specification.
+#[clap(name = "bcc_validator")]
+struct Args {
+    #[clap(subcommand)]
+    action: Action,
+}
+
+#[derive(Subcommand)]
+enum Action {
+    VerifyChain(VerifyChainArgs),
+}
+
+#[derive(Parser)]
+/// Verify that a DICE chain is well formed
+struct VerifyChainArgs {
+    /// Dump the DICE chain on the standard output
+    #[clap(long)]
+    dump: bool,
+
+    /// Path to a file containing a DICE chain
+    chain: String,
+}
+
 fn main() -> Result<()> {
-    let mut app = clap::Command::new("bcc_validator").subcommand(
-        SubCommand::with_name("verify-chain")
-            .arg(Arg::with_name("dump").long("dump"))
-            .arg(Arg::with_name("chain")),
-    );
-
-    let usage = app.render_usage();
-
-    let args = app.get_matches();
-    if let Some(("verify-chain", sub_args)) = args.subcommand() {
-        if let Some(chain) = sub_args.value_of("chain") {
-            let chain = bcc::Chain::from_bytes(&fs::read(chain)?)?;
-            println!("Success!");
-            if sub_args.is_present("dump") {
-                print!("{}", chain);
-            }
-            return Ok(());
-        }
+    let args = Args::parse();
+    let Action::VerifyChain(sub_args) = args.action;
+    let chain = bcc::Chain::from_bytes(&fs::read(sub_args.chain)?)?;
+    println!("Success!");
+    if sub_args.dump {
+        print!("{}", chain);
     }
-    eprintln!("{}", usage);
-    bail!("Invalid arguments");
+    Ok(())
 }
