@@ -5,4 +5,3 @@ pub mod bcc;
 pub mod publickey;
 
 mod cbor;
-mod display;
