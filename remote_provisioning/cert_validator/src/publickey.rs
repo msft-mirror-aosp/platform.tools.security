@@ -7,7 +7,7 @@ use openssl::bn::BigNum;
 use openssl::ecdsa::EcdsaSig;
 use openssl::hash::MessageDigest;
 use openssl::nid::Nid;
-use openssl::pkey::{Id, PKey, Public};
+use openssl::pkey::{HasParams, Id, PKey, PKeyRef, Public};
 use openssl::sign::Verifier;
 use std::error::Error;
 use std::fmt;
@@ -35,6 +35,10 @@ pub struct PublicKey {
 impl PublicKey {
     pub(crate) fn kind(&self) -> Kind {
         self.kind
+    }
+
+    pub(crate) fn pkey(&self) -> &PKeyRef<Public> {
+        &self.pkey
     }
 
     fn verify_ed25519(&self, signature: &[u8], message: &[u8]) -> Result<bool> {
@@ -99,16 +103,20 @@ impl TryFrom<PKey<Public>> for PublicKey {
     type Error = TryFromPKeyError;
 
     fn try_from(pkey: PKey<Public>) -> Result<Self, Self::Error> {
-        let kind = match pkey.id() {
-            Id::ED25519 => Kind::Ed25519,
-            Id::EC => match pkey.ec_key().unwrap().group().curve_name() {
-                Some(Nid::X9_62_PRIME256V1) => Kind::Ec(EcKind::P256),
-                Some(Nid::SECP384R1) => Kind::Ec(EcKind::P384),
-                _ => return Err(TryFromPKeyError(())),
-            },
-            _ => return Err(TryFromPKeyError(())),
-        };
+        let kind = pkey_kind(&pkey).ok_or(TryFromPKeyError(()))?;
         Ok(Self { kind, pkey })
+    }
+}
+
+fn pkey_kind<T: HasParams>(pkey: &PKeyRef<T>) -> Option<Kind> {
+    match pkey.id() {
+        Id::ED25519 => Some(Kind::Ed25519),
+        Id::EC => match pkey.ec_key().unwrap().group().curve_name() {
+            Some(Nid::X9_62_PRIME256V1) => Some(Kind::Ec(EcKind::P256)),
+            Some(Nid::SECP384R1) => Some(Kind::Ec(EcKind::P384)),
+            _ => None,
+        },
+        _ => None,
     }
 }
 
@@ -159,6 +167,22 @@ mod tests {
 pub(crate) mod testkeys {
     use super::*;
     use openssl::pkey::Private;
+
+    pub struct PrivateKey {
+        pkey: PKey<Private>,
+    }
+
+    impl PrivateKey {
+        pub fn from_pem(pem: &str) -> Self {
+            let pkey = PKey::private_key_from_pem(pem.as_bytes()).unwrap();
+            pkey_kind(&pkey).expect("unsupported private key");
+            Self { pkey }
+        }
+
+        pub fn public_key(&self) -> PublicKey {
+            public_from_private(&self.pkey).try_into().unwrap()
+        }
+    }
 
     /// Gives the public key that matches the private key.
     pub fn public_from_private(pkey: &PKey<Private>) -> PKey<Public> {
