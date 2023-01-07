@@ -4,8 +4,8 @@ use crate::publickey::{EcKind, Kind, PublicKey};
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use coset::cbor::value::Value;
 use coset::iana::{self, EnumI64};
-use coset::{Algorithm, CoseKey, KeyOperation, KeyType, Label};
-use openssl::bn::BigNum;
+use coset::{Algorithm, CoseKey, CoseKeyBuilder, KeyOperation, KeyType, Label};
+use openssl::bn::{BigNum, BigNumContext};
 use openssl::ec::{EcGroup, EcKey};
 use openssl::nid::Nid;
 use openssl::pkey::{Id, PKey, Public};
@@ -29,6 +29,36 @@ impl PublicKey {
             Kind::Ec(EcKind::P256) => iana::Algorithm::ES256,
             Kind::Ec(EcKind::P384) => iana::Algorithm::ES384,
         }
+    }
+
+    /// Convert the public key into a [`CoseKey`].
+    pub fn to_cose_key(&self) -> Result<CoseKey> {
+        let builder = match self.kind() {
+            Kind::Ed25519 => {
+                let label_crv = iana::OkpKeyParameter::Crv.to_i64();
+                let label_x = iana::OkpKeyParameter::X.to_i64();
+                let x = self.pkey().raw_public_key().context("Get ed25519 raw public key")?;
+                CoseKeyBuilder::new_okp_key()
+                    .param(label_crv, Value::from(iana::EllipticCurve::Ed25519.to_i64()))
+                    .param(label_x, Value::from(x))
+            }
+            Kind::Ec(ec) => {
+                let key = self.pkey().ec_key().unwrap();
+                let group = key.group();
+                let mut ctx = BigNumContext::new().context("Failed to create bignum context")?;
+                let mut x = BigNum::new().context("Failed to create x coord")?;
+                let mut y = BigNum::new().context("Failed to create y coord")?;
+                key.public_key()
+                    .affine_coordinates_gfp(group, &mut x, &mut y, &mut ctx)
+                    .context("Get EC coordinates")?;
+                let crv = match ec {
+                    EcKind::P256 => iana::EllipticCurve::P_256,
+                    EcKind::P384 => iana::EllipticCurve::P_384,
+                };
+                CoseKeyBuilder::new_ec2_pub_key(crv, x.to_vec(), y.to_vec())
+            }
+        };
+        Ok(builder.algorithm(self.iana_algorithm()).add_key_op(iana::KeyOperation::Verify).build())
     }
 }
 
@@ -86,4 +116,26 @@ fn get_label_value_as_bytes(key: &CoseKey, label: Label) -> Result<&[u8]> {
         .as_bytes()
         .ok_or_else(|| anyhow!("Value not a bstr."))
         .map(Vec::as_slice)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::publickey::testkeys::{PrivateKey, ED25519_KEY_PEM, P256_KEY_PEM};
+
+    #[test]
+    fn to_and_from_okp_cose_key() {
+        let key = PrivateKey::from_pem(ED25519_KEY_PEM[0]).public_key();
+        let value = key.to_cose_key().unwrap();
+        let new_key = PublicKey::from_cose_key(&value).unwrap();
+        assert!(key.pkey().public_eq(new_key.pkey()));
+    }
+
+    #[test]
+    fn to_and_from_ec2_cose_key() {
+        let key = PrivateKey::from_pem(P256_KEY_PEM[0]).public_key();
+        let value = key.to_cose_key().unwrap();
+        let new_key = PublicKey::from_cose_key(&value).unwrap();
+        assert!(key.pkey().public_eq(new_key.pkey()));
+    }
 }
