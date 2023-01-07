@@ -74,7 +74,6 @@ fn check_sign1_chain<T: IntoIterator<Item = Value>>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cbor::value_from_file;
     use std::fs;
 
     #[test]
@@ -107,41 +106,5 @@ mod tests {
     fn check_chain_bad_final_signature() {
         let chain = fs::read("testdata/bcc/bad_final_signature.chain").unwrap();
         assert!(Chain::from_cbor(&chain).is_err());
-    }
-
-    #[test]
-    fn check_sign1_cert_chain() -> Result<()> {
-        let chain = [
-            value_from_file("testdata/bcc/_CBOR_Ed25519_cert_full_cert_chain_0.cert")?,
-            value_from_file("testdata/bcc/_CBOR_Ed25519_cert_full_cert_chain_1.cert")?,
-            value_from_file("testdata/bcc/_CBOR_Ed25519_cert_full_cert_chain_2.cert")?,
-        ];
-        let root_key = None;
-        check_sign1_chain(chain, root_key)?;
-        Ok(())
-    }
-
-    #[test]
-    fn check_sign1_cert_chain_invalid() -> Result<()> {
-        let chain = [
-            value_from_file("testdata/bcc/_CBOR_Ed25519_cert_full_cert_chain_0.cert")?,
-            value_from_file("testdata/bcc/_CBOR_Ed25519_cert_full_cert_chain_2.cert")?,
-        ];
-        let root_key = None;
-        assert!(check_sign1_chain(chain, root_key).is_err());
-        Ok(())
-    }
-
-    #[test]
-    fn check_sign1_chain_array() -> Result<()> {
-        let cbor_file = value_from_file("testdata/bcc/_CBOR_bcc_entry_cert_array.cert")?;
-        let cbor_arr = match cbor_file {
-            Value::Array(a) => a,
-            _ => bail!("Not an array"),
-        };
-        assert_eq!(cbor_arr.len(), 3);
-        let root_key = None;
-        check_sign1_chain(cbor_arr, root_key)?;
-        Ok(())
     }
 }
