@@ -36,7 +36,7 @@ struct VerifyChainArgs {
 fn main() -> Result<()> {
     let args = Args::parse();
     let Action::VerifyChain(sub_args) = args.action;
-    let chain = bcc::Chain::from_bytes(&fs::read(sub_args.chain)?)?;
+    let chain = bcc::Chain::from_cbor(&fs::read(sub_args.chain)?)?;
     println!("Success!");
     if sub_args.dump {
         print!("{}", chain);
