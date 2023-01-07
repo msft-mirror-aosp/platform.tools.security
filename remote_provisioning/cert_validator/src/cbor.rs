@@ -11,14 +11,6 @@ fn cose_error(ce: coset::CoseError) -> anyhow::Error {
 
 type CiboriumError = ciborium::de::Error<std::io::Error>;
 
-/// Reads the provided binary cbor-encoded file and returns a
-/// ciborium::Value struct wrapped in Result.
-#[cfg(test)]
-fn value_from_file(fname: &str) -> Result<Value, CiboriumError> {
-    let bytes = std::fs::read(fname)?;
-    value_from_bytes(&bytes)
-}
-
 /// Decodes the provided binary CBOR-encoded value and returns a
 /// ciborium::Value struct wrapped in Result.
 fn value_from_bytes(mut bytes: &[u8]) -> Result<Value, CiboriumError> {
