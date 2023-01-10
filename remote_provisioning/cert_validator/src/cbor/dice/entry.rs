@@ -1,5 +1,5 @@
 use super::field_value::FieldValue;
-use crate::bcc::entry::{ConfigDesc, DiceMode, Payload};
+use crate::bcc::entry::{ConfigDesc, ConfigDescBuilder, DiceMode, Payload, PayloadBuilder};
 use crate::cbor::{cose_error, value_from_bytes};
 use crate::publickey::PublicKey;
 use anyhow::{anyhow, bail, ensure, Context, Result};
@@ -70,10 +70,10 @@ fn payload_from_sign1(
     let payload = payload_from_slice(bytes.as_slice())?;
     if let Some(expected_issuer) = expected_issuer {
         ensure!(
-            payload.issuer == expected_issuer,
+            payload.issuer() == expected_issuer,
             "COSE_sign1's issuer ({}) does not match the subject of the previous payload in \
             the chain ({}).",
-            payload.issuer,
+            payload.issuer(),
             expected_issuer
         );
     }
@@ -153,18 +153,18 @@ fn payload_from_slice(bytes: &[u8]) -> Result<Payload> {
         bail!("key usage must be keyCertSign")
     };
 
-    Ok(Payload {
-        issuer,
-        subject,
-        subject_public_key,
-        mode,
-        code_desc,
-        code_hash,
-        config_desc,
-        config_hash,
-        authority_desc,
-        authority_hash,
-    })
+    PayloadBuilder::with_subject_public_key(subject_public_key)
+        .issuer(issuer)
+        .subject(subject)
+        .mode(mode)
+        .code_desc(code_desc)
+        .code_hash(code_hash)
+        .config_desc(config_desc)
+        .config_hash(config_hash)
+        .authority_desc(authority_desc)
+        .authority_hash(authority_hash)
+        .build()
+        .context("building payload")
 }
 
 fn cbor_map_from_slice(bytes: &[u8]) -> Result<Vec<(Value, Value)>> {
@@ -208,13 +208,11 @@ fn config_desc_from_slice(bytes: &[u8]) -> Result<ConfigDesc> {
         }
     }
 
-    let component_name =
-        component_name.into_optional_string().context("Component name must be a string")?;
-    let component_version =
-        component_version.into_optional_i64().context("Component version must be an integer")?;
-    let resettable = resettable.is_null().context("Error interpreting resettable field")?;
-
-    Ok(ConfigDesc { component_name, component_version, resettable })
+    Ok(ConfigDescBuilder::new()
+        .component_name(component_name.into_optional_string().context("Component name")?)
+        .component_version(component_version.into_optional_i64().context("Component version")?)
+        .resettable(resettable.is_null().context("Resettable")?)
+        .build())
 }
 
 #[cfg(test)]
