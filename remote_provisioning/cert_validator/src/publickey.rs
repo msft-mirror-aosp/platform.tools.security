@@ -27,6 +27,7 @@ pub(crate) enum EcKind {
 }
 
 /// Struct wrapping the public key and relevant validation methods.
+#[derive(Debug)]
 pub struct PublicKey {
     kind: Kind,
     pkey: PKey<Public>,
