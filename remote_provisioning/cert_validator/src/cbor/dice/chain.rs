@@ -62,8 +62,8 @@ fn check_sign1_chain<T: IntoIterator<Item = Value>>(
         payloads.push(payload);
 
         let previous = payloads.last().unwrap();
-        expected_issuer = Some(previous.subject.as_str());
-        previous_public_key = Some(&previous.subject_public_key);
+        expected_issuer = Some(previous.subject());
+        previous_public_key = Some(previous.subject_public_key());
     }
 
     ensure!(!payloads.is_empty(), "Cert chain is empty.");
