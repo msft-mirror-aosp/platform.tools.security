@@ -27,6 +27,7 @@ pub(crate) enum EcKind {
 }
 
 /// Struct wrapping the public key and relevant validation methods.
+#[derive(Debug)]
 pub struct PublicKey {
     kind: Kind,
     pkey: PKey<Public>,
@@ -196,11 +197,28 @@ pub(crate) mod testkeys {
         -----END PRIVATE KEY-----\n"];
 
     /// A selection of elliptic curve P-256 private keys.
-    pub const P256_KEY_PEM: &[&str] = &["-----BEGIN PRIVATE KEY-----\n\
+    pub const P256_KEY_PEM: &[&str] = &[
+        "-----BEGIN PRIVATE KEY-----\n\
         MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg+CO3ZBuAsimwPKAL\n\
         IeDyCh4cRZ5EMd6llGu5MQCpibGhRANCAAQObPxc4bIPjupILrvKJjTrpTcyCf6q\n\
         V552FlS67fGphwhg2LDfQ8adEdkuRfQvk+IvKJz8MDcPjErBG3Wlps1N\n\
-        -----END PRIVATE KEY-----\n"];
+        -----END PRIVATE KEY-----\n",
+        "-----BEGIN PRIVATE KEY-----\n\
+        MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgw1OPIcfQv5twO68B\n\
+        H+xNstW3DLXC6e4PGEYG/VppYVahRANCAAQMyWyv4ffVMu+wVNhNEk2mQSaTmSl/\n\
+        dLdRbEowfqPwMzdqdQ3QlKSV4ZcU2lsJEuQMkZzmVPz02enY2qcKctmj\n\
+        -----END PRIVATE KEY-----\n",
+        "-----BEGIN PRIVATE KEY-----\n\
+        MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgbXO6ee7i7sY4YfFS\n\
+        Gn60ScPuL3QuYFMX4nJbcqPSQ7+hRANCAAS8i9xA8cIcWStbMG97YrttQsYEIR2a\n\
+        15+alxbb6b7422FuxBB0qG5nJ4m+Jd3Bp+N2lwx4rHBFDqU4cp8VlQav\n\
+        -----END PRIVATE KEY-----\n",
+        "-----BEGIN PRIVATE KEY-----\n\
+        MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg/JuxkbpPyyouat11\n\
+        szDR+OA7d/fuMk9IhGkH7z1xHzChRANCAASRlY0D7Uh5T/FmB6txGr21w6jqKW2x\n\
+        RXdsaZgCB6XnrXlkgkvuWDc0CTLSBWdPFgW6OX0fyXViglEBH95REyQr\n\
+        -----END PRIVATE KEY-----\n",
+    ];
 
     /// A selection of elliptic curve P-384 private keys.
     pub const P384_KEY_PEM: &[&str] = &["-----BEGIN PRIVATE KEY-----\n\
