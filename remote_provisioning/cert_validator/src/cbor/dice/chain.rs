@@ -1,3 +1,4 @@
+use super::entry::Entry;
 use crate::bcc::entry::Payload;
 use crate::bcc::Chain;
 use crate::cbor::{cose_error, value_from_bytes};
@@ -13,60 +14,38 @@ impl Chain {
     /// extracted. This does not perform any semantic validation of the data in the
     /// certificates such as the Authority, Config and Code hashes.
     pub fn from_cbor(bytes: &[u8]) -> Result<Self> {
-        /*
-         * CDDL (from keymint/ProtectedData.aidl):
-         *
-         * Bcc = [
-         *     PubKeyEd25519 / PubKeyECDSA256, // DK_pub
-         *     + BccEntry,                     // Root -> leaf (KM_pub)
-         * ]
-         */
+        let (root_public_key, it) = root_and_entries_from_cbor(bytes)?;
+        Self::from_root_and_entries(root_public_key, it)
+    }
 
-        let value = value_from_bytes(bytes).context("Unable to decode top-level CBOR")?;
-        let array = match value {
-            Array(array) if array.len() >= 2 => array,
-            _ => bail!("Invalid BCC. Expected an array of at least length 2, found: {:?}", value),
-        };
-        let mut it = array.into_iter();
-
-        let root_public_key = CoseKey::from_cbor_value(it.next().unwrap())
-            .map_err(cose_error)
-            .context("Error parsing root public key CBOR")?;
-
-        let root_public_key =
-            PublicKey::from_cose_key(&root_public_key).context("Invalid root key")?;
-        let payloads =
-            check_sign1_chain(it, Some(&root_public_key)).context("Invalid certificate chain")?;
-
-        Self::validate(root_public_key, payloads).context("Building chain")
+    fn from_root_and_entries(root: PublicKey, values: std::vec::IntoIter<Value>) -> Result<Self> {
+        let mut payloads = Vec::with_capacity(values.len());
+        let mut previous_public_key = &root;
+        for (n, value) in values.enumerate() {
+            let entry = Entry::verify_cbor_value(value, previous_public_key)
+                .with_context(|| format!("Invalid entry at index {}", n))?;
+            let payload = Payload::from_cbor(entry.payload())
+                .with_context(|| format!("Invalid payload at index {}", n))?;
+            payloads.push(payload);
+            let previous = payloads.last().unwrap();
+            previous_public_key = previous.subject_public_key();
+        }
+        Self::validate(root, payloads).context("Building chain")
     }
 }
 
-/// Parse a series of BccEntry certificates, represented as CBOR Values, checking the public key of
-/// any given cert's payload in the series correctly signs the next, and verifying the payloads
-/// are well formed. If root_key is specified then it must be the key used to sign the first (root)
-/// certificate; otherwise that signature is not checked.
-fn check_sign1_chain<T: IntoIterator<Item = Value>>(
-    chain: T,
-    root_key: Option<&PublicKey>,
-) -> Result<Vec<Payload>> {
-    let values = chain.into_iter();
-    let mut payloads = Vec::<Payload>::with_capacity(values.size_hint().0);
-
-    let mut previous_public_key = root_key;
-    let mut expected_issuer: Option<&str> = None;
-
-    for (n, value) in values.enumerate() {
-        let payload = Payload::from_cbor_sign1(previous_public_key, expected_issuer, value)
-            .with_context(|| format!("Invalid BccPayload at index {}", n))?;
-        payloads.push(payload);
-
-        let previous = payloads.last().unwrap();
-        expected_issuer = Some(previous.subject());
-        previous_public_key = Some(previous.subject_public_key());
-    }
-
-    Ok(payloads)
+fn root_and_entries_from_cbor(bytes: &[u8]) -> Result<(PublicKey, std::vec::IntoIter<Value>)> {
+    let value = value_from_bytes(bytes).context("Unable to decode top-level CBOR")?;
+    let array = match value {
+        Array(array) if array.len() >= 2 => array,
+        _ => bail!("Invalid BCC. Expected an array of at least length 2, found: {:?}", value),
+    };
+    let mut it = array.into_iter();
+    let root_public_key = CoseKey::from_cbor_value(it.next().unwrap())
+        .map_err(cose_error)
+        .context("Error parsing root public key CBOR")?;
+    let root_public_key = PublicKey::from_cose_key(&root_public_key).context("Invalid root key")?;
+    Ok((root_public_key, it))
 }
 
 #[cfg(test)]
