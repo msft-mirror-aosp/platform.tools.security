@@ -3,4 +3,4 @@
 mod chain;
 pub mod entry;
 
-pub use chain::Chain;
+pub use chain::{Chain, ChainForm, DegenerateChain};
