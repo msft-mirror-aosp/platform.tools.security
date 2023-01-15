@@ -7,6 +7,14 @@ use std::collections::HashSet;
 use std::fmt::{self, Display, Formatter};
 use thiserror::Error;
 
+/// Enumeration of the different forms that a DICE chain can take.
+pub enum ChainForm {
+    /// A proper DICE chain with multiple layers of trust.
+    Proper(Chain),
+    /// A degenerate DICE chain consisting of a single self-signed certificate.
+    Degenerate(DegenerateChain),
+}
+
 /// Represents a full Boot Certificate Chain (BCC). This consists of the root public key (which
 /// signs the first certificate), followed by a chain of BccEntry certificates. Apart from the
 /// first, the issuer of each cert is the subject of the previous one.
@@ -97,6 +105,67 @@ impl Display for Chain {
     }
 }
 
+#[derive(Error, Debug, PartialEq, Eq)]
+pub(crate) enum DegenerateChainError {
+    #[error("issuer empty")]
+    IssuerEmpty,
+    #[error("subject empty")]
+    SubjectEmpty,
+}
+
+/// A degenerate DICE chain. These chains consist of a single, self-signed certificate and the
+/// entries contain less information than usual. They are expected from devices that haven't
+/// implemented everything necessary to produce a proper DICE Chain.
+#[derive(Debug)]
+pub struct DegenerateChain {
+    issuer: String,
+    subject: String,
+    subject_public_key: PublicKey,
+}
+
+impl DegenerateChain {
+    pub(crate) fn new<I: Into<String>, S: Into<String>>(
+        issuer: I,
+        subject: S,
+        subject_public_key: PublicKey,
+    ) -> Result<Self, DegenerateChainError> {
+        let issuer = issuer.into();
+        let subject = subject.into();
+        if issuer.is_empty() {
+            return Err(DegenerateChainError::IssuerEmpty);
+        }
+        if subject.is_empty() {
+            return Err(DegenerateChainError::SubjectEmpty);
+        }
+        Ok(Self { issuer, subject, subject_public_key })
+    }
+
+    /// Gets the issuer of the degenerate chain.
+    pub fn issuer(&self) -> &str {
+        &self.issuer
+    }
+
+    /// Gets the subject of the degenerate chain.
+    pub fn subject(&self) -> &str {
+        &self.subject
+    }
+
+    /// Gets the public key of the degenerate chain.
+    pub fn public_key(&self) -> &PublicKey {
+        &self.subject_public_key
+    }
+}
+
+impl Display for DegenerateChain {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
+        writeln!(f, "Public key:")?;
+        writeln!(f, "{}", self.public_key().to_pem())?;
+        writeln!(f, "Issuer: {}", self.issuer)?;
+        writeln!(f, "Subject: {}", self.subject)?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,5 +251,25 @@ mod tests {
             .mode(DiceMode::Normal)
             .code_hash(vec![0; 64])
             .authority_hash(vec![0; 64])
+    }
+
+    #[test]
+    fn degenerate_chain_valid() {
+        let key = PrivateKey::from_pem(ED25519_KEY_PEM[0]).public_key();
+        DegenerateChain::new("issuer", "subject", key).unwrap();
+    }
+
+    #[test]
+    fn degenerate_chain_empty_issuer() {
+        let key = PrivateKey::from_pem(ED25519_KEY_PEM[0]).public_key();
+        let err = DegenerateChain::new("", "subject", key).unwrap_err();
+        assert_eq!(err, DegenerateChainError::IssuerEmpty);
+    }
+
+    #[test]
+    fn degenerate_chain_empty_subject() {
+        let key = PrivateKey::from_pem(ED25519_KEY_PEM[0]).public_key();
+        let err = DegenerateChain::new("issuer", "", key).unwrap_err();
+        assert_eq!(err, DegenerateChainError::SubjectEmpty);
     }
 }
