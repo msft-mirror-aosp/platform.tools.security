@@ -1,0 +1,49 @@
+package {
+    default_visibility: ["//visibility:private"],
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+genrule {
+    name: "libcert_request_validator_cxx_bridge_header",
+    tools: ["cxxbridge"],
+    cmd: "$(location cxxbridge) $(in) --header > $(out)",
+    srcs: ["lib.rs"],
+    out: ["cert_request_validator/lib.rs.h"],
+}
+
+genrule {
+    name: "libcert_request_validator_cxx_bridge_code",
+    tools: ["cxxbridge"],
+    cmd: "$(location cxxbridge) $(in) >> $(out)",
+    srcs: ["lib.rs"],
+    out: ["cert_request_validator/lib.rs.cpp"],
+}
+
+rust_ffi_static {
+    name: "libcert_request_validator_cxx_bridge",
+    crate_name: "cert_request_validator_cxx_bridge",
+    host_supported: true,
+    vendor_available: true,
+    srcs: ["lib.rs"],
+    rustlibs: [
+        "libcert_request_validator",
+        "libcoset",
+        "libcxx",
+    ]
+}
+
+cc_library {
+    name: "libcert_request_validator_cxx",
+    visibility: ["//hardware/interfaces/security/keymint/support"],
+    host_supported: true,
+    vendor_available: true,
+    srcs: ["cert_request_validator.cpp"],
+    export_include_dirs: ["include"],
+    generated_sources: ["libcert_request_validator_cxx_bridge_code"],
+    generated_headers: ["libcert_request_validator_cxx_bridge_header"],
+    whole_static_libs: ["libcert_request_validator_cxx_bridge"],
+    shared_libs: [
+        "libbase",
+        "libcrypto",
+    ],
+}
