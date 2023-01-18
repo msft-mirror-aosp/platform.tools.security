@@ -1,7 +1,7 @@
 {
   "presubmit": [
     {
-      "name": "libcert_request_validator_tests"
+      "name": "libhwtrust_tests"
     },
     {
       "name": "VtsHalRemotelyProvisionedComponentTargetTest"

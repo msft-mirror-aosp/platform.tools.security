@@ -1,10 +1,10 @@
 //! This library provides bindings for C++ code to comfortably and reasonably safely interface with
-//! the libcert_request_validator Rust library.
+//! the libhwtrust Rust library.
 
-use cert_request_validator::bcc::ChainForm;
 use coset::CborSerializable;
+use hwtrust::bcc::ChainForm;
 
-#[cxx::bridge(namespace = "cert_request_validator::rust")]
+#[cxx::bridge(namespace = "hwtrust::rust")]
 mod ffi {
     /// The result type used by [`verify_dice_chain()`]. The standard [`Result`] is currently only
     /// converted to exceptions by `cxxbridge` but we can't use exceptions so need to do something

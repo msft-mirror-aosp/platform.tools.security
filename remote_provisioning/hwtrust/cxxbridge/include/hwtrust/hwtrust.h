@@ -5,7 +5,7 @@
 
 #include <android-base/result.h>
 
-namespace cert_request_validator {
+namespace hwtrust {
 
 // Hide the details of the rust binding from clients with an opaque type.
 struct BoxedDiceChain;
@@ -26,4 +26,4 @@ private:
   size_t size_;
 };
 
-} // namespace cert_request_validator
+} // namespace hwtrust
