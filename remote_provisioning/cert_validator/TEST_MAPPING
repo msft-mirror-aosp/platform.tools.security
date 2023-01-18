@@ -4,6 +4,9 @@
       "name": "libcert_request_validator_tests"
     },
     {
+      "name": "VtsHalRemotelyProvisionedComponentTargetTest"
+    },
+    {
       "name": "ComposHostTestCases"
     }
   ]

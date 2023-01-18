@@ -20,6 +20,7 @@ rust_library {
     defaults: ["cert_request_validator_defaults"],
     crate_name: "cert_request_validator",
     srcs: ["src/lib.rs"],
+    vendor_available: true,
     apex_available: [
         "//apex_available:platform",
         "com.android.compos",
