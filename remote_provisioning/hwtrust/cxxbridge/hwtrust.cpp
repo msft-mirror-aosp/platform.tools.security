@@ -1,10 +1,10 @@
-#include <cert_request_validator/cert_request_validator.h>
-#include <cert_request_validator/lib.rs.h>
+#include <hwtrust/hwtrust.h>
+#include <hwtrust/lib.rs.h>
 
 using android::base::Error;
 using android::base::Result;
 
-namespace cert_request_validator {
+namespace hwtrust {
 
 struct BoxedDiceChain {
     ::rust::Box<rust::DiceChain> chain;
@@ -38,4 +38,4 @@ Result<std::vector<std::vector<uint8_t>>> DiceChain::cose_public_keys() const no
   return result;
 }
 
-} // namespace cert_request_validator
+} // namespace hwtrust

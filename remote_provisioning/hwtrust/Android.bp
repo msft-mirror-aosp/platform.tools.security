@@ -3,7 +3,7 @@ package {
 }
 
 rust_defaults {
-    name: "cert_request_validator_defaults",
+    name: "hwtrust_defaults",
     host_supported: true,
     rustlibs: [
         "libanyhow",
@@ -16,9 +16,9 @@ rust_defaults {
 }
 
 rust_library {
-    name: "libcert_request_validator",
-    defaults: ["cert_request_validator_defaults"],
-    crate_name: "cert_request_validator",
+    name: "libhwtrust",
+    defaults: ["hwtrust_defaults"],
+    crate_name: "hwtrust",
     srcs: ["src/lib.rs"],
     vendor_available: true,
     apex_available: [
@@ -34,8 +34,8 @@ filegroup(
 )
 
 rust_test {
-    name: "libcert_request_validator_tests",
-    defaults: ["cert_request_validator_defaults"],
+    name: "libhwtrust_tests",
+    defaults: ["hwtrust_defaults"],
     srcs: ["src/lib.rs"],
     data: [":testdata"],
     test_suites: ["general-tests"],
@@ -45,27 +45,27 @@ rust_test {
         unit_test: false,
     },
     rustlibs: [
-        "libcert_request_validator",
+        "libhwtrust",
     ],
 }
 
 rust_binary {
-    name: "bcc_validator",
-    defaults: ["cert_request_validator_defaults"],
-    srcs: ["src/bcc_main.rs"],
+    name: "hwtrust",
+    defaults: ["hwtrust_defaults"],
+    srcs: ["src/main.rs"],
     rustlibs: [
-        "libcert_request_validator",
         "libclap",
+        "libhwtrust",
     ],
 }
 
 rust_test {
-    name: "bcc_validator.test",
-    defaults: ["cert_request_validator_defaults"],
-    srcs: ["src/bcc_main.rs"],
+    name: "hwtrust.test",
+    defaults: ["hwtrust_defaults"],
+    srcs: ["src/main.rs"],
     rustlibs: [
-        "libcert_request_validator",
         "libclap",
+        "libhwtrust",
     ],
     test_suites: ["general-tests"],
 }
