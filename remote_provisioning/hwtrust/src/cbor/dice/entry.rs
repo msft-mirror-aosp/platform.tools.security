@@ -2,9 +2,9 @@ use super::field_value::FieldValue;
 use crate::cbor::{cose_error, value_from_bytes};
 use crate::dice::{ConfigDesc, ConfigDescBuilder, DiceMode, Payload, PayloadBuilder};
 use crate::publickey::PublicKey;
-use anyhow::{anyhow, bail, ensure, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use ciborium::value::Value;
-use coset::{Algorithm, AsCborValue, CborSerializable, CoseKey, CoseSign1, Header};
+use coset::{AsCborValue, CborSerializable, CoseKey, CoseSign1};
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::HashMap;
 
@@ -33,12 +33,7 @@ impl Entry {
         let sign1 = CoseSign1::from_cbor_value(cbor)
             .map_err(cose_error)
             .context("Given CBOR does not appear to be a COSE_sign1")?;
-        let algorithm = Algorithm::Assigned(key.iana_algorithm());
-        check_protected_header(&algorithm, &sign1.protected.header)
-            .context("Validation of bcc entry protected header failed.")?;
-        sign1
-            .verify_signature(b"", |s, m| key.verify(s, m))
-            .context("public key cannot verify cose_sign1 cert")?;
+        key.verify_cose_sign1(&sign1).context("cannot verify COSE_sign1")?;
         match sign1.payload {
             None => bail!("Missing payload"),
             Some(payload) => Ok(Self { payload }),
@@ -48,17 +43,6 @@ impl Entry {
     pub(super) fn payload(&self) -> &[u8] {
         &self.payload
     }
-}
-
-/// Validate the protected header of a bcc entry with respect to the provided
-/// alg (typically originating from the subject public key of the payload).
-fn check_protected_header(alg: &Algorithm, header: &Header) -> Result<()> {
-    ensure!(
-        header.alg.as_ref() == Some(alg),
-        "Protected 'alg' header doesn't have the expected algorithm"
-    );
-    ensure!(header.crit.is_empty(), "No critical header values may be defined in the BCC");
-    Ok(())
 }
 
 impl Payload {
@@ -239,22 +223,118 @@ fn config_desc_from_slice(bytes: &[u8]) -> Result<ConfigDesc> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use anyhow::Result;
-    use coset::{iana, Header, Label, RegisteredLabel};
+    use crate::cbor::serialize;
+    use crate::publickey::testkeys::{PrivateKey, ED25519_KEY_PEM};
+    use ciborium::cbor;
+    use coset::CborSerializable;
+    use std::collections::HashMap;
 
     #[test]
-    fn check_bcc_entry_protected_header() -> Result<()> {
-        let eddsa = coset::Algorithm::Assigned(iana::Algorithm::EdDSA);
-        let header = Header { alg: Some(eddsa.clone()), ..Default::default() };
-        check_protected_header(&eddsa, &header).context("Only alg allowed")?;
-        let header = Header { alg: Some(coset::Algorithm::PrivateUse(1000)), ..Default::default() };
-        assert!(check_protected_header(&eddsa, &header).is_err());
-        let mut header = Header { alg: Some(eddsa.clone()), ..Default::default() };
-        header.rest.push((Label::Int(1000), Value::from(2000u16)));
-        check_protected_header(&eddsa, &header).context("non-crit header allowed")?;
-        let mut header = Header { alg: Some(eddsa.clone()), ..Default::default() };
-        header.crit.push(RegisteredLabel::Assigned(iana::HeaderParameter::CounterSignature));
-        assert!(check_protected_header(&eddsa, &header).is_err());
-        Ok(())
+    fn valid_payload() {
+        payload_from_fields(valid_payload_fields()).unwrap();
+    }
+
+    #[test]
+    fn key_usage_only_key_cert_sign() {
+        let mut fields = valid_payload_fields();
+        fields.insert(KEY_USAGE, Value::Bytes(vec![0x20]));
+        payload_from_fields(fields).unwrap();
+    }
+
+    #[test]
+    fn key_usage_too_long() {
+        let mut fields = valid_payload_fields();
+        fields.insert(KEY_USAGE, Value::Bytes(vec![0x20, 0x30, 0x40]));
+        assert!(payload_from_fields(fields).is_err());
+    }
+
+    #[test]
+    fn key_usage_lacks_key_cert_sign() {
+        let mut fields = valid_payload_fields();
+        fields.insert(KEY_USAGE, Value::Bytes(vec![0x10]));
+        assert!(payload_from_fields(fields).is_err());
+    }
+
+    #[test]
+    fn key_usage_not_just_key_cert_sign() {
+        let mut fields = valid_payload_fields();
+        fields.insert(KEY_USAGE, Value::Bytes(vec![0x21]));
+        assert!(payload_from_fields(fields).is_err());
+    }
+
+    #[test]
+    fn mode_not_configured() {
+        let mut fields = valid_payload_fields();
+        fields.insert(MODE, Value::Bytes(vec![0]));
+        let payload = payload_from_fields(fields).unwrap();
+        assert_eq!(payload.mode(), DiceMode::NotConfigured);
+    }
+
+    #[test]
+    fn mode_normal() {
+        let mut fields = valid_payload_fields();
+        fields.insert(MODE, Value::Bytes(vec![1]));
+        let payload = payload_from_fields(fields).unwrap();
+        assert_eq!(payload.mode(), DiceMode::Normal);
+    }
+
+    #[test]
+    fn mode_debug() {
+        let mut fields = valid_payload_fields();
+        fields.insert(MODE, Value::Bytes(vec![2]));
+        let payload = payload_from_fields(fields).unwrap();
+        assert_eq!(payload.mode(), DiceMode::Debug);
+    }
+
+    #[test]
+    fn mode_recovery() {
+        let mut fields = valid_payload_fields();
+        fields.insert(MODE, Value::Bytes(vec![3]));
+        let payload = payload_from_fields(fields).unwrap();
+        assert_eq!(payload.mode(), DiceMode::Recovery);
+    }
+
+    #[test]
+    fn mode_invalid_becomes_not_configured() {
+        let mut fields = valid_payload_fields();
+        fields.insert(MODE, Value::Bytes(vec![4]));
+        let payload = payload_from_fields(fields).unwrap();
+        assert_eq!(payload.mode(), DiceMode::NotConfigured);
+    }
+
+    #[test]
+    fn mode_multiple_bytes() {
+        let mut fields = valid_payload_fields();
+        fields.insert(MODE, Value::Bytes(vec![0, 1]));
+        assert!(payload_from_fields(fields).is_err());
+    }
+
+    #[test]
+    fn subject_public_key_garbage() {
+        let mut fields = valid_payload_fields();
+        fields.insert(SUBJECT_PUBLIC_KEY, Value::Bytes(vec![17; 64]));
+        assert!(payload_from_fields(fields).is_err());
+    }
+
+    fn valid_payload_fields() -> HashMap<i64, Value> {
+        let key = PrivateKey::from_pem(ED25519_KEY_PEM[0]).public_key();
+        let subject_public_key = key.to_cose_key().unwrap().to_vec().unwrap();
+        let config_desc = serialize(cbor!({COMPONENT_NAME => "component name"}).unwrap());
+        HashMap::from([
+            (ISS, Value::from("issuer")),
+            (SUB, Value::from("subject")),
+            (SUBJECT_PUBLIC_KEY, Value::Bytes(subject_public_key)),
+            (KEY_USAGE, Value::Bytes(vec![0x20])),
+            (CODE_HASH, Value::Bytes(vec![1; 64])),
+            (CONFIG_DESC, Value::Bytes(config_desc)),
+            (AUTHORITY_HASH, Value::Bytes(vec![2; 64])),
+            (MODE, Value::Bytes(vec![0])),
+        ])
+    }
+
+    fn payload_from_fields(mut fields: HashMap<i64, Value>) -> Result<Payload> {
+        let value = Value::Map(fields.drain().map(|(k, v)| (Value::from(k), v)).collect());
+        let cbor = serialize(value);
+        Payload::from_cbor(&cbor)
     }
 }
