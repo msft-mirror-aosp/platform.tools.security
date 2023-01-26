@@ -19,6 +19,6 @@ use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
     let encoded = hex::encode(data);
-    let decoded = hex::decode(&encoded);
+    let decoded = hex::decode(encoded);
     assert_eq!(&decoded.unwrap(), data);
 });
