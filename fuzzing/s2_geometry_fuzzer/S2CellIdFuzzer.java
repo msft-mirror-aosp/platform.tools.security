@@ -1,4 +1,4 @@
-// Copyright 2021, The Android Open Source Project
+// Copyright 2022, The Android Open Source Project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,20 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(missing_docs)]
-#![no_main]
+import com.code_intelligence.jazzer.api.FuzzedDataProvider;
+import com.google.common.geometry.S2CellId;
 
-use libfuzzer_sys::fuzz_target;
+public class S2CellIdFuzzer {
 
-fn heap_oob() {
-    let xs = vec![0, 1, 2, 3];
-    let val = unsafe { *xs.as_ptr().offset(4) };
-    println!("Out-of-bounds heap value: {}", val);
-}
-
-fuzz_target!(|data: &[u8]| {
-    let magic_number = 327;
-    if data.len() == magic_number {
-        heap_oob();
+    public static void fuzzerTestOneInput(FuzzedDataProvider data) {
+        S2CellId id = new S2CellId(data.consumeLong());
+        while (data.remainingBytes() > 0) {
+                try
+                {
+                    id.fromToken(data.consumeString(Integer.MAX_VALUE));
+                } catch (NumberFormatException e) {}
+        }
     }
-});
+}

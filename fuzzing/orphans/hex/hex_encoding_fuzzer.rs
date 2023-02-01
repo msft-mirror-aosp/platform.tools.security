@@ -1,4 +1,4 @@
-// Copyright 2021, The Android Open Source Project
+// Copyright 2022, The Android Open Source Project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,15 +17,8 @@
 
 use libfuzzer_sys::fuzz_target;
 
-fn heap_oob() {
-    let xs = vec![0, 1, 2, 3];
-    let val = unsafe { *xs.as_ptr().offset(4) };
-    println!("Out-of-bounds heap value: {}", val);
-}
-
 fuzz_target!(|data: &[u8]| {
-    let magic_number = 327;
-    if data.len() == magic_number {
-        heap_oob();
-    }
+    let encoded = hex::encode(data);
+    let decoded = hex::decode(encoded);
+    assert_eq!(&decoded.unwrap(), data);
 });
