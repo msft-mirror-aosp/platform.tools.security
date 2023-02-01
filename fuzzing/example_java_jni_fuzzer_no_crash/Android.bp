@@ -7,6 +7,10 @@ java_fuzz_host {
     srcs: [
         "ExampleJavaJniFuzzer.java",
     ],
+    fuzz_config: {
+        fuzz_on_haiku_device: false,
+        fuzz_on_haiku_host: false,
+    },
     static_libs: [
         "jazzer",
     ],
