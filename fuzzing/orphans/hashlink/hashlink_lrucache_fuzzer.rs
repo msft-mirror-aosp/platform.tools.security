@@ -14,6 +14,7 @@
 
 #![allow(missing_docs)]
 #![no_main]
+#![feature(bench_black_box)]
 
 use hashlink::LruCache;
 use libfuzzer_sys::arbitrary::Arbitrary;
