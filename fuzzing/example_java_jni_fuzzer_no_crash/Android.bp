@@ -2,25 +2,23 @@ package {
     default_applicable_licenses: ["Android-Apache-2.0"],
 }
 
-java_fuzz_host {
+java_fuzz {
     name: "example_java_jni_no_crash_fuzzer",
     srcs: [
         "ExampleJavaJniFuzzer.java",
+    ],
+    host_supported: true,
+    device_supported: false,
+    static_libs: [
+        "jazzer",
     ],
     fuzz_config: {
         fuzz_on_haiku_device: false,
         fuzz_on_haiku_host: false,
     },
-    static_libs: [
-        "jazzer",
-    ],
     jni_libs: [
         "libnative_asan_no_crash",
         "libc++",
-    ],
-    sanitizers: [
-        "address",
-        "fuzzer",
     ],
 }
 
