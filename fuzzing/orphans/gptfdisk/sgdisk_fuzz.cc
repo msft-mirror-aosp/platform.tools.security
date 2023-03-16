@@ -14,10 +14,10 @@ static int fuzz_gpt(char* partition_file) {
     GPTData gptData;
     GPTPart partData;
     int numParts = 0;
-    stringstream res;
+    std::stringstream res;
 
     gptData.JustLooking();
-    gptData.LoadPartitions((string) partition_file);
+    gptData.LoadPartitions(partition_file);
     gptData.LoadMainTable();
     gptData.GetDiskGUID();
     numParts = gptData.GetNumParts();
