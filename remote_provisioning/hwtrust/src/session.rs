@@ -18,6 +18,11 @@ pub struct Options {
     /// This option can be used for compatibility with the RKP HAL before v3 which diverged from
     /// the COSE spec and allowed a single int instead of always requiring an array.
     pub dice_chain_key_ops_type: KeyOpsType,
+
+    /// The types that are permitted for the mode field of the DICE certificates. This option can
+    /// be used for compatibility with the RKP HAL v3 which allowed some deviations from the Open
+    /// Profile for DICE specification.
+    pub dice_chain_mode_type: ModeType,
 }
 
 /// Format of the DICE configuration descriptor.
@@ -38,4 +43,37 @@ pub enum KeyOpsType {
     Array,
     /// The key_ops field can be either a single int or an array as specified in the COSE RFC.
     IntOrArray,
+}
+
+/// Type allowed for the DICE certificate mode field.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ModeType {
+    /// The mode field must be a byte string holding a single byte as specified by the Open Profile
+    /// for DICE.
+    #[default]
+    Bytes,
+    /// The mode field can be either an int or a byte string holding a single byte.
+    IntOrBytes,
+}
+
+impl Options {
+    /// The options use by VSR 13.
+    pub fn vsr13() -> Self {
+        Self {
+            // Context: b/262599829#comment65
+            dice_chain_key_ops_type: KeyOpsType::IntOrArray,
+            ..Options::default()
+        }
+    }
+
+    /// The options use by VSR 14.
+    pub fn vsr14() -> Self {
+        Self {
+            // Context: b/261647022
+            first_dice_chain_cert_config_format: ConfigFormat::Permissive,
+            // Context: b/273552826
+            dice_chain_mode_type: ModeType::IntOrBytes,
+            ..Options::default()
+        }
+    }
 }
