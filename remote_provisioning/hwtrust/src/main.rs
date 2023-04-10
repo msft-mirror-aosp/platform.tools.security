@@ -1,8 +1,9 @@
 //! A tool for handling data related to the hardware root-of-trust.
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use hwtrust::dice;
+use hwtrust::session::{Options, Session};
 use std::fs;
 
 #[derive(Parser)]
@@ -33,12 +34,33 @@ struct VerifyDiceChainArgs {
 
     /// Path to a file containing a DICE chain
     chain: String,
+
+    /// The VSR version to validate against. If omitted, the set of rules that are used have no
+    /// compromises or workarounds and new implementations should validate against them as it will
+    /// be the basis for future VSR versions.
+    #[clap(long, value_enum)]
+    vsr: Option<VsrVersion>,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+enum VsrVersion {
+    /// VSR 13 / Android T / 2022
+    Vsr13,
+    /// VSR 14 / Android U / 2023
+    Vsr14,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
     let Action::VerifyDiceChain(sub_args) = args.action;
-    let chain = dice::Chain::from_cbor(&fs::read(sub_args.chain)?)?;
+    let session = Session {
+        options: match sub_args.vsr {
+            Some(VsrVersion::Vsr13) => Options::vsr13(),
+            Some(VsrVersion::Vsr14) => Options::vsr14(),
+            None => Options::default(),
+        },
+    };
+    let chain = dice::Chain::from_cbor(&session, &fs::read(sub_args.chain)?)?;
     println!("Success!");
     if sub_args.dump {
         print!("{}", chain);
