@@ -1,11 +1,14 @@
+use super::cose_key_from_cbor_value;
 use super::field_value::FieldValue;
 use crate::cbor::{cose_error, value_from_bytes};
-use crate::dice::{ConfigDesc, ConfigDescBuilder, DiceMode, Payload, PayloadBuilder};
+use crate::dice::{
+    ComponentVersion, ConfigDesc, ConfigDescBuilder, DiceMode, Payload, PayloadBuilder,
+};
 use crate::publickey::PublicKey;
-use crate::session::ConfigFormat;
+use crate::session::{ComponentVersionType, ConfigFormat, ModeType, Session};
 use anyhow::{anyhow, bail, Context, Result};
 use ciborium::value::Value;
-use coset::{AsCborValue, CborSerializable, CoseKey, CoseSign1};
+use coset::{AsCborValue, CoseSign1};
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::HashMap;
 
@@ -49,8 +52,12 @@ impl Entry {
 }
 
 impl Payload {
-    pub(super) fn from_cbor(bytes: &[u8], config_format: ConfigFormat) -> Result<Self> {
-        let f = PayloadFields::from_cbor(bytes, config_format)?;
+    pub(super) fn from_cbor(
+        session: &Session,
+        bytes: &[u8],
+        config_format: ConfigFormat,
+    ) -> Result<Self> {
+        let f = PayloadFields::from_cbor(session, bytes, config_format)?;
         PayloadBuilder::with_subject_public_key(f.subject_public_key)
             .issuer(f.issuer)
             .subject(f.subject)
@@ -80,7 +87,11 @@ pub(super) struct PayloadFields {
 }
 
 impl PayloadFields {
-    pub(super) fn from_cbor(bytes: &[u8], config_format: ConfigFormat) -> Result<Self> {
+    pub(super) fn from_cbor(
+        session: &Session,
+        bytes: &[u8],
+        config_format: ConfigFormat,
+    ) -> Result<Self> {
         let mut issuer = FieldValue::new("issuer");
         let mut subject = FieldValue::new("subject");
         let mut subject_public_key = FieldValue::new("subject public key");
@@ -116,16 +127,16 @@ impl PayloadFields {
             }
         }
 
-        validate_key_usage(key_usage)?;
+        validate_key_usage(session, key_usage)?;
 
         Ok(Self {
             issuer: issuer.into_string().context("issuer")?,
             subject: subject.into_string().context("subject")?,
-            subject_public_key: validate_subject_public_key(subject_public_key)?,
-            mode: validate_mode(mode).context("mode")?,
+            subject_public_key: validate_subject_public_key(session, subject_public_key)?,
+            mode: validate_mode(session, mode).context("mode")?,
             code_desc: code_desc.into_optional_bytes().context("code descriptor")?,
             code_hash: code_hash.into_optional_bytes().context("code hash")?,
-            config_desc: validate_config_desc(config_desc, config_format)
+            config_desc: validate_config_desc(session, config_desc, config_format)
                 .context("config descriptor")?,
             config_hash: config_hash.into_optional_bytes().context("config hash")?,
             authority_desc: authority_desc.into_optional_bytes().context("authority descriptor")?,
@@ -134,47 +145,68 @@ impl PayloadFields {
     }
 }
 
-fn validate_key_usage(key_usage: FieldValue) -> Result<()> {
+fn validate_key_usage(session: &Session, key_usage: FieldValue) -> Result<()> {
     let key_usage = key_usage.into_bytes().context("key usage")?;
-    if key_usage.len() != 1 || key_usage[0] != 0x20 {
-        bail!("key usage must be keyCertSign");
+    let key_cert_sign = 1 << 5;
+    if key_usage.len() > 1
+        && session.options.dice_chain_allow_big_endian_key_usage
+        && key_usage[key_usage.len() - 1] == key_cert_sign
+        && key_usage.iter().take(key_usage.len() - 1).all(|&x| x == 0)
+    {
+        return Ok(());
+    }
+    if key_usage.is_empty()
+        || key_usage[0] != key_cert_sign
+        || !key_usage.iter().skip(1).all(|&x| x == 0)
+    {
+        bail!("key usage must only contain keyCertSign (bit 5)");
     };
     Ok(())
 }
 
-fn validate_subject_public_key(subject_public_key: FieldValue) -> Result<PublicKey> {
+fn validate_subject_public_key(
+    session: &Session,
+    subject_public_key: FieldValue,
+) -> Result<PublicKey> {
     let subject_public_key = subject_public_key.into_bytes().context("Subject public")?;
-    let subject_public_key = CoseKey::from_slice(&subject_public_key)
-        .map_err(cose_error)
-        .context("parsing subject public key from bytes")?;
+    let subject_public_key = value_from_bytes(&subject_public_key).context("decode CBOR")?;
+    let subject_public_key = cose_key_from_cbor_value(session, subject_public_key)
+        .context("parsing subject public key")?;
     PublicKey::from_cose_key(&subject_public_key)
         .context("parsing subject public key from COSE_key")
 }
 
-fn validate_mode(mode: FieldValue) -> Result<Option<DiceMode>> {
-    let mode = mode.into_optional_bytes()?;
-    mode.map(|mode| {
-        if mode.len() != 1 {
-            bail!("Expected mode to be a single byte, actual byte count: {}", mode.len())
-        };
-        Ok(match mode[0] {
-            1 => DiceMode::Normal,
-            2 => DiceMode::Debug,
-            3 => DiceMode::Recovery,
-            _ => DiceMode::NotConfigured,
-        })
-    })
-    .transpose()
+fn validate_mode(session: &Session, mode: FieldValue) -> Result<Option<DiceMode>> {
+    Ok(if !mode.is_bytes() && session.options.dice_chain_mode_type == ModeType::IntOrBytes {
+        mode.into_optional_i64()?
+    } else {
+        mode.into_optional_bytes()?
+            .map(|mode| {
+                if mode.len() != 1 {
+                    bail!("Expected mode to be a single byte, actual byte count: {}", mode.len())
+                };
+                Ok(mode[0].into())
+            })
+            .transpose()?
+    }
+    .map(|mode| match mode {
+        1 => DiceMode::Normal,
+        2 => DiceMode::Debug,
+        3 => DiceMode::Recovery,
+        _ => DiceMode::NotConfigured,
+    }))
 }
 
 fn validate_config_desc(
+    session: &Session,
     config_desc: FieldValue,
     config_format: ConfigFormat,
 ) -> Result<Option<ConfigDesc>> {
     let config_desc = config_desc.into_optional_bytes()?;
     config_desc
         .map(|config_desc| {
-            let config = config_desc_from_slice(&config_desc).context("parsing config descriptor");
+            let config =
+                config_desc_from_slice(session, &config_desc).context("parsing config descriptor");
             if config.is_err() && config_format == ConfigFormat::Permissive {
                 Ok(ConfigDesc::default())
             } else {
@@ -193,7 +225,7 @@ fn cbor_map_from_slice(bytes: &[u8]) -> Result<Vec<(Value, Value)>> {
     Ok(entries)
 }
 
-fn config_desc_from_slice(bytes: &[u8]) -> Result<ConfigDesc> {
+fn config_desc_from_slice(session: &Session, bytes: &[u8]) -> Result<ConfigDesc> {
     let entries = cbor_map_from_slice(bytes)?;
 
     let mut component_name = FieldValue::new("component name");
@@ -230,9 +262,24 @@ fn config_desc_from_slice(bytes: &[u8]) -> Result<ConfigDesc> {
 
     Ok(ConfigDescBuilder::new()
         .component_name(component_name.into_optional_string().context("Component name")?)
-        .component_version(component_version.into_optional_i64().context("Component version")?)
+        .component_version(
+            validate_version(session, component_version).context("Component version")?,
+        )
         .resettable(resettable.is_null().context("Resettable")?)
         .build())
+}
+
+fn validate_version(session: &Session, field: FieldValue) -> Result<Option<ComponentVersion>> {
+    Ok(
+        if !field.is_integer()
+            && session.options.dice_chain_component_version_type
+                == ComponentVersionType::IntOrString
+        {
+            field.into_optional_string()?.map(ComponentVersion::String)
+        } else {
+            field.into_optional_i64()?.map(ComponentVersion::Integer)
+        },
+    )
 }
 
 #[cfg(test)]
@@ -240,7 +287,9 @@ mod tests {
     use super::*;
     use crate::cbor::serialize;
     use crate::publickey::testkeys::{PrivateKey, ED25519_KEY_PEM};
+    use crate::session::{KeyOpsType, Options};
     use ciborium::cbor;
+    use coset::iana::{self, EnumI64};
     use coset::CborSerializable;
     use std::collections::HashMap;
 
@@ -298,7 +347,13 @@ mod tests {
             map.push((Value::from(COMPONENT_NAME), Value::from(component_name)));
         }
         if let Some(component_version) = config_desc.component_version() {
-            map.push((Value::from(COMPONENT_VERSION), Value::from(component_version)));
+            map.push((
+                Value::from(COMPONENT_VERSION),
+                match component_version {
+                    ComponentVersion::Integer(n) => Value::from(*n),
+                    ComponentVersion::String(s) => Value::from(s.as_str()),
+                },
+            ))
         }
         if config_desc.resettable() {
             map.push((Value::from(RESETTABLE), Value::Null));
@@ -309,42 +364,49 @@ mod tests {
     #[test]
     fn valid_payload() {
         let fields = valid_payload_fields();
-        Payload::from_cbor(&serialize_fields(fields), ConfigFormat::Android).unwrap();
+        let session = Session { options: Options::default() };
+        Payload::from_cbor(&session, &serialize_fields(fields), ConfigFormat::Android).unwrap();
     }
 
     #[test]
     fn key_usage_only_key_cert_sign() {
         let mut fields = valid_payload_fields();
         fields.insert(KEY_USAGE, Value::Bytes(vec![0x20]));
-        Payload::from_cbor(&serialize_fields(fields), ConfigFormat::Android).unwrap();
+        let session = Session { options: Options::default() };
+        Payload::from_cbor(&session, &serialize_fields(fields), ConfigFormat::Android).unwrap();
     }
 
     #[test]
     fn key_usage_too_long() {
         let mut fields = valid_payload_fields();
         fields.insert(KEY_USAGE, Value::Bytes(vec![0x20, 0x30, 0x40]));
-        Payload::from_cbor(&serialize_fields(fields), ConfigFormat::Android).unwrap_err();
+        let session = Session { options: Options::default() };
+        Payload::from_cbor(&session, &serialize_fields(fields), ConfigFormat::Android).unwrap_err();
     }
 
     #[test]
     fn key_usage_lacks_key_cert_sign() {
         let mut fields = valid_payload_fields();
         fields.insert(KEY_USAGE, Value::Bytes(vec![0x10]));
-        Payload::from_cbor(&serialize_fields(fields), ConfigFormat::Android).unwrap_err();
+        let session = Session { options: Options::default() };
+        Payload::from_cbor(&session, &serialize_fields(fields), ConfigFormat::Android).unwrap_err();
     }
 
     #[test]
     fn key_usage_not_just_key_cert_sign() {
         let mut fields = valid_payload_fields();
         fields.insert(KEY_USAGE, Value::Bytes(vec![0x21]));
-        Payload::from_cbor(&serialize_fields(fields), ConfigFormat::Android).unwrap_err();
+        let session = Session { options: Options::default() };
+        Payload::from_cbor(&session, &serialize_fields(fields), ConfigFormat::Android).unwrap_err();
     }
 
     #[test]
     fn mode_not_configured() {
         let mut fields = valid_payload_fields();
         fields.insert(MODE, Value::Bytes(vec![0]));
-        let payload = Payload::from_cbor(&serialize_fields(fields), ConfigFormat::Android).unwrap();
+        let session = Session { options: Options::default() };
+        let payload =
+            Payload::from_cbor(&session, &serialize_fields(fields), ConfigFormat::Android).unwrap();
         assert_eq!(payload.mode(), DiceMode::NotConfigured);
     }
 
@@ -352,7 +414,9 @@ mod tests {
     fn mode_normal() {
         let mut fields = valid_payload_fields();
         fields.insert(MODE, Value::Bytes(vec![1]));
-        let payload = Payload::from_cbor(&serialize_fields(fields), ConfigFormat::Android).unwrap();
+        let session = Session { options: Options::default() };
+        let payload =
+            Payload::from_cbor(&session, &serialize_fields(fields), ConfigFormat::Android).unwrap();
         assert_eq!(payload.mode(), DiceMode::Normal);
     }
 
@@ -360,7 +424,9 @@ mod tests {
     fn mode_debug() {
         let mut fields = valid_payload_fields();
         fields.insert(MODE, Value::Bytes(vec![2]));
-        let payload = Payload::from_cbor(&serialize_fields(fields), ConfigFormat::Android).unwrap();
+        let session = Session { options: Options::default() };
+        let payload =
+            Payload::from_cbor(&session, &serialize_fields(fields), ConfigFormat::Android).unwrap();
         assert_eq!(payload.mode(), DiceMode::Debug);
     }
 
@@ -368,7 +434,9 @@ mod tests {
     fn mode_recovery() {
         let mut fields = valid_payload_fields();
         fields.insert(MODE, Value::Bytes(vec![3]));
-        let payload = Payload::from_cbor(&serialize_fields(fields), ConfigFormat::Android).unwrap();
+        let session = Session { options: Options::default() };
+        let payload =
+            Payload::from_cbor(&session, &serialize_fields(fields), ConfigFormat::Android).unwrap();
         assert_eq!(payload.mode(), DiceMode::Recovery);
     }
 
@@ -376,7 +444,9 @@ mod tests {
     fn mode_invalid_becomes_not_configured() {
         let mut fields = valid_payload_fields();
         fields.insert(MODE, Value::Bytes(vec![4]));
-        let payload = Payload::from_cbor(&serialize_fields(fields), ConfigFormat::Android).unwrap();
+        let session = Session { options: Options::default() };
+        let payload =
+            Payload::from_cbor(&session, &serialize_fields(fields), ConfigFormat::Android).unwrap();
         assert_eq!(payload.mode(), DiceMode::NotConfigured);
     }
 
@@ -384,14 +454,100 @@ mod tests {
     fn mode_multiple_bytes() {
         let mut fields = valid_payload_fields();
         fields.insert(MODE, Value::Bytes(vec![0, 1]));
-        Payload::from_cbor(&serialize_fields(fields), ConfigFormat::Android).unwrap_err();
+        let session = Session { options: Options::default() };
+        Payload::from_cbor(&session, &serialize_fields(fields), ConfigFormat::Android).unwrap_err();
+    }
+
+    #[test]
+    fn mode_int_debug() {
+        let mut fields = valid_payload_fields();
+        fields.insert(MODE, Value::from(2));
+        let cbor = serialize_fields(fields);
+        let session = Session { options: Options::default() };
+        Payload::from_cbor(&session, &cbor, ConfigFormat::Android).unwrap_err();
+        let session = Session {
+            options: Options { dice_chain_mode_type: ModeType::IntOrBytes, ..Options::default() },
+        };
+        let payload = Payload::from_cbor(&session, &cbor, ConfigFormat::Android).unwrap();
+        assert_eq!(payload.mode(), DiceMode::Debug);
     }
 
     #[test]
     fn subject_public_key_garbage() {
         let mut fields = valid_payload_fields();
         fields.insert(SUBJECT_PUBLIC_KEY, Value::Bytes(vec![17; 64]));
-        Payload::from_cbor(&serialize_fields(fields), ConfigFormat::Android).unwrap_err();
+        let session = Session { options: Options::default() };
+        Payload::from_cbor(&session, &serialize_fields(fields), ConfigFormat::Android).unwrap_err();
+    }
+
+    #[test]
+    fn key_usage_little_endian() {
+        let mut fields = valid_payload_fields();
+        fields.insert(KEY_USAGE, Value::Bytes(vec![0x20, 0x00, 0x00]));
+        let cbor = serialize_fields(fields);
+        let session = Session { options: Options::default() };
+        Payload::from_cbor(&session, &cbor, ConfigFormat::Android).unwrap();
+    }
+
+    #[test]
+    fn key_usage_little_endian_invalid() {
+        let mut fields = valid_payload_fields();
+        fields.insert(KEY_USAGE, Value::Bytes(vec![0x20, 0xbe, 0xef]));
+        let cbor = serialize_fields(fields);
+        let session = Session { options: Options::default() };
+        Payload::from_cbor(&session, &cbor, ConfigFormat::Android).unwrap_err();
+    }
+
+    #[test]
+    fn key_usage_big_endian() {
+        let mut fields = valid_payload_fields();
+        fields.insert(KEY_USAGE, Value::Bytes(vec![0x00, 0x20]));
+        let cbor = serialize_fields(fields);
+        let session = Session { options: Options::default() };
+        Payload::from_cbor(&session, &cbor, ConfigFormat::Android).unwrap_err();
+        let session = Session {
+            options: Options { dice_chain_allow_big_endian_key_usage: true, ..Options::default() },
+        };
+        Payload::from_cbor(&session, &cbor, ConfigFormat::Android).unwrap();
+    }
+
+    #[test]
+    fn key_usage_big_endian_invalid() {
+        let mut fields = valid_payload_fields();
+        fields.insert(KEY_USAGE, Value::Bytes(vec![0x00, 0xfe, 0x20]));
+        let cbor = serialize_fields(fields);
+        let session = Session { options: Options::default() };
+        Payload::from_cbor(&session, &cbor, ConfigFormat::Android).unwrap_err();
+        let session = Session {
+            options: Options { dice_chain_allow_big_endian_key_usage: true, ..Options::default() },
+        };
+        Payload::from_cbor(&session, &cbor, ConfigFormat::Android).unwrap_err();
+    }
+
+    #[test]
+    fn key_usage_invalid() {
+        let mut fields = valid_payload_fields();
+        fields.insert(KEY_USAGE, Value::Bytes(vec![0x00, 0x10]));
+        let cbor = serialize_fields(fields);
+        let session = Session { options: Options::default() };
+        Payload::from_cbor(&session, &cbor, ConfigFormat::Android).unwrap_err();
+        let session = Session {
+            options: Options { dice_chain_allow_big_endian_key_usage: true, ..Options::default() },
+        };
+        Payload::from_cbor(&session, &cbor, ConfigFormat::Android).unwrap_err();
+    }
+
+    #[test]
+    fn key_usage_empty() {
+        let mut fields = valid_payload_fields();
+        fields.insert(KEY_USAGE, Value::Bytes(vec![]));
+        let cbor = serialize_fields(fields);
+        let session = Session { options: Options::default() };
+        Payload::from_cbor(&session, &cbor, ConfigFormat::Android).unwrap_err();
+        let session = Session {
+            options: Options { dice_chain_allow_big_endian_key_usage: true, ..Options::default() },
+        };
+        Payload::from_cbor(&session, &cbor, ConfigFormat::Android).unwrap_err();
     }
 
     #[test]
@@ -399,7 +555,8 @@ mod tests {
         let mut fields = valid_payload_fields();
         let config_desc = serialize(cbor!({-69999 => "custom"}).unwrap());
         fields.insert(CONFIG_DESC, Value::Bytes(config_desc));
-        Payload::from_cbor(&serialize_fields(fields), ConfigFormat::Android).unwrap();
+        let session = Session { options: Options::default() };
+        Payload::from_cbor(&session, &serialize_fields(fields), ConfigFormat::Android).unwrap();
     }
 
     #[test]
@@ -407,7 +564,8 @@ mod tests {
         let mut fields = valid_payload_fields();
         let config_desc = serialize(cbor!({-70000 => "reserved"}).unwrap());
         fields.insert(CONFIG_DESC, Value::Bytes(config_desc));
-        Payload::from_cbor(&serialize_fields(fields), ConfigFormat::Android).unwrap_err();
+        let session = Session { options: Options::default() };
+        Payload::from_cbor(&session, &serialize_fields(fields), ConfigFormat::Android).unwrap_err();
     }
 
     #[test]
@@ -415,7 +573,8 @@ mod tests {
         let mut fields = valid_payload_fields();
         let config_desc = serialize(cbor!({-70999 => "reserved"}).unwrap());
         fields.insert(CONFIG_DESC, Value::Bytes(config_desc));
-        Payload::from_cbor(&serialize_fields(fields), ConfigFormat::Android).unwrap_err();
+        let session = Session { options: Options::default() };
+        Payload::from_cbor(&session, &serialize_fields(fields), ConfigFormat::Android).unwrap_err();
     }
 
     #[test]
@@ -423,7 +582,8 @@ mod tests {
         let mut fields = valid_payload_fields();
         let config_desc = serialize(cbor!({-71000 => "custom"}).unwrap());
         fields.insert(CONFIG_DESC, Value::Bytes(config_desc));
-        Payload::from_cbor(&serialize_fields(fields), ConfigFormat::Android).unwrap();
+        let session = Session { options: Options::default() };
+        Payload::from_cbor(&session, &serialize_fields(fields), ConfigFormat::Android).unwrap();
     }
 
     #[test]
@@ -431,9 +591,55 @@ mod tests {
         let mut fields = valid_payload_fields();
         fields.insert(CONFIG_DESC, Value::Bytes(vec![0xcd; 64]));
         let cbor = serialize_fields(fields);
-        Payload::from_cbor(&cbor, ConfigFormat::Android).unwrap_err();
-        let payload = Payload::from_cbor(&cbor, ConfigFormat::Permissive).unwrap();
+        let session = Session { options: Options::default() };
+        Payload::from_cbor(&session, &cbor, ConfigFormat::Android).unwrap_err();
+        let payload = Payload::from_cbor(&session, &cbor, ConfigFormat::Permissive).unwrap();
         assert_eq!(payload.config_desc(), &ConfigDesc::default());
+    }
+
+    #[test]
+    fn config_desc_component_version_string() {
+        let mut fields = valid_payload_fields();
+        let config_desc = serialize(cbor!({COMPONENT_VERSION => "It's version 4"}).unwrap());
+        fields.insert(CONFIG_DESC, Value::Bytes(config_desc));
+        let cbor = serialize_fields(fields);
+        let session = Session {
+            options: Options {
+                dice_chain_component_version_type: ComponentVersionType::Int,
+                ..Options::default()
+            },
+        };
+        Payload::from_cbor(&session, &cbor, ConfigFormat::Android).unwrap_err();
+        let session = Session { options: Options::default() };
+        let payload = Payload::from_cbor(&session, &cbor, ConfigFormat::Android).unwrap();
+        assert_eq!(
+            payload.config_desc().component_version(),
+            Some(&ComponentVersion::String("It's version 4".to_string()))
+        );
+    }
+
+    #[test]
+    fn integer_key_ops() {
+        let mut fields = valid_payload_fields();
+        let subject_public_key = cbor!({
+            iana::KeyParameter::Kty.to_i64() => iana::KeyType::OKP.to_i64(),
+            iana::KeyParameter::Alg.to_i64() => iana::Algorithm::EdDSA.to_i64(),
+            iana::KeyParameter::KeyOps.to_i64() => iana::KeyOperation::Verify.to_i64(),
+            iana::OkpKeyParameter::Crv.to_i64() => iana::EllipticCurve::Ed25519.to_i64(),
+            iana::OkpKeyParameter::X.to_i64() => Value::Bytes(vec![0; 32]),
+        })
+        .unwrap();
+        fields.insert(SUBJECT_PUBLIC_KEY, Value::Bytes(serialize(subject_public_key)));
+        let cbor = serialize_fields(fields);
+        let session = Session { options: Options::default() };
+        Payload::from_cbor(&session, &cbor, ConfigFormat::Android).unwrap_err();
+        let session = Session {
+            options: Options {
+                dice_chain_key_ops_type: KeyOpsType::IntOrArray,
+                ..Options::default()
+            },
+        };
+        Payload::from_cbor(&session, &cbor, ConfigFormat::Android).unwrap();
     }
 
     fn valid_payload_fields() -> HashMap<i64, Value> {
