@@ -24,6 +24,6 @@ cc_fuzz {
         critical: false,
         fuzz_on_haiku_device: true,
         fuzz_on_haiku_host: true,
-        assignee: "davfu@google.com"
+        triage_assignee: "davfu@google.com"
     },
 }
