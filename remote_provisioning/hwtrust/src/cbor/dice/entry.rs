@@ -1,14 +1,14 @@
 use super::cose_key_from_cbor_value;
-use super::field_value::FieldValue;
-use crate::cbor::{cose_error, value_from_bytes};
+use crate::cbor::{cose_error, field_value::FieldValue, value_from_bytes};
 use crate::dice::{
     ComponentVersion, ConfigDesc, ConfigDescBuilder, DiceMode, Payload, PayloadBuilder,
 };
 use crate::publickey::PublicKey;
 use crate::session::{ComponentVersionType, ConfigFormat, ModeType, Session};
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, ensure, Context, Result};
 use ciborium::value::Value;
 use coset::{AsCborValue, CoseSign1};
+use openssl::sha::{sha256, sha384, sha512};
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::HashMap;
 
@@ -29,6 +29,7 @@ const CONFIG_DESC_RESERVED_MIN: i64 = -70999;
 const COMPONENT_NAME: i64 = -70002;
 const COMPONENT_VERSION: i64 = -70003;
 const RESETTABLE: i64 = -70004;
+const SECURITY_VERSION: i64 = -70005;
 
 pub(super) struct Entry {
     payload: Vec<u8>,
@@ -121,26 +122,35 @@ impl PayloadFields {
                     KEY_USAGE => &mut key_usage,
                     _ => bail!("Unknown key {}", key),
                 };
-                field.set(value)?;
+                match field.get() {
+                    Some(existing) => bail!(
+                        "duplicate values for {}: {:?} and {:?}",
+                        field.name(),
+                        existing,
+                        value
+                    ),
+                    None => field.set(value),
+                }
             } else {
                 bail!("Invalid key: {:?}", key);
             }
         }
 
         validate_key_usage(session, key_usage)?;
+        let (config_desc, config_hash) =
+            validate_config(session, config_desc, config_hash, config_format).context("config")?;
 
         Ok(Self {
-            issuer: issuer.into_string().context("issuer")?,
-            subject: subject.into_string().context("subject")?,
+            issuer: issuer.into_string()?,
+            subject: subject.into_string()?,
             subject_public_key: validate_subject_public_key(session, subject_public_key)?,
-            mode: validate_mode(session, mode).context("mode")?,
-            code_desc: code_desc.into_optional_bytes().context("code descriptor")?,
-            code_hash: code_hash.into_optional_bytes().context("code hash")?,
-            config_desc: validate_config_desc(session, config_desc, config_format)
-                .context("config descriptor")?,
-            config_hash: config_hash.into_optional_bytes().context("config hash")?,
-            authority_desc: authority_desc.into_optional_bytes().context("authority descriptor")?,
-            authority_hash: authority_hash.into_optional_bytes().context("authority hash")?,
+            mode: validate_mode(session, mode)?,
+            code_desc: code_desc.into_optional_bytes()?,
+            code_hash: code_hash.into_optional_bytes()?,
+            config_desc,
+            config_hash,
+            authority_desc: authority_desc.into_optional_bytes()?,
+            authority_hash: authority_hash.into_optional_bytes()?,
         })
     }
 }
@@ -168,7 +178,7 @@ fn validate_subject_public_key(
     session: &Session,
     subject_public_key: FieldValue,
 ) -> Result<PublicKey> {
-    let subject_public_key = subject_public_key.into_bytes().context("Subject public")?;
+    let subject_public_key = subject_public_key.into_bytes()?;
     let subject_public_key = value_from_bytes(&subject_public_key).context("decode CBOR")?;
     let subject_public_key = cose_key_from_cbor_value(session, subject_public_key)
         .context("parsing subject public key")?;
@@ -197,23 +207,32 @@ fn validate_mode(session: &Session, mode: FieldValue) -> Result<Option<DiceMode>
     }))
 }
 
-fn validate_config_desc(
+fn validate_config(
     session: &Session,
     config_desc: FieldValue,
+    config_hash: FieldValue,
     config_format: ConfigFormat,
-) -> Result<Option<ConfigDesc>> {
+) -> Result<(Option<ConfigDesc>, Option<Vec<u8>>)> {
     let config_desc = config_desc.into_optional_bytes()?;
-    config_desc
-        .map(|config_desc| {
-            let config =
-                config_desc_from_slice(session, &config_desc).context("parsing config descriptor");
-            if config.is_err() && config_format == ConfigFormat::Permissive {
-                Ok(ConfigDesc::default())
-            } else {
-                config
-            }
-        })
-        .transpose()
+    let config_hash = config_hash.into_optional_bytes()?;
+    if let Some(config_desc) = config_desc {
+        let config = config_desc_from_slice(session, &config_desc).context("parsing descriptor");
+        if config.is_err() && config_format == ConfigFormat::Permissive {
+            return Ok((Some(ConfigDesc::default()), config_hash));
+        }
+        if !session.options.dice_chain_config_hash_unverified {
+            let Some(ref hash) = config_hash else { bail!("hash required") };
+            match hash.len() {
+                32 => ensure!(hash == &sha256(&config_desc)),
+                48 => ensure!(hash == &sha384(&config_desc)),
+                64 => ensure!(hash == &sha512(&config_desc)),
+                _ => bail!("unsupported hash size"),
+            };
+        }
+        Ok((Some(config?), config_hash))
+    } else {
+        Ok((None, config_hash))
+    }
 }
 
 fn cbor_map_from_slice(bytes: &[u8]) -> Result<Vec<(Value, Value)>> {
@@ -231,30 +250,35 @@ fn config_desc_from_slice(session: &Session, bytes: &[u8]) -> Result<ConfigDesc>
     let mut component_name = FieldValue::new("component name");
     let mut component_version = FieldValue::new("component version");
     let mut resettable = FieldValue::new("resettable");
+    let mut security_version = FieldValue::new("security version");
     let mut extensions = HashMap::new();
 
     for (key, value) in entries.into_iter() {
         if let Some(Ok(key)) = key.as_integer().map(TryInto::try_into) {
-            match key {
-                COMPONENT_NAME => {
-                    component_name.set(value).context("Error setting component name")?
-                }
-                COMPONENT_VERSION => {
-                    component_version.set(value).context("Error setting component version")?
-                }
-                RESETTABLE => resettable.set(value).context("Error setting resettable")?,
+            let field = match key {
+                COMPONENT_NAME => &mut component_name,
+                COMPONENT_VERSION => &mut component_version,
+                RESETTABLE => &mut resettable,
+                SECURITY_VERSION => &mut security_version,
                 key if (CONFIG_DESC_RESERVED_MIN..=CONFIG_DESC_RESERVED_MAX).contains(&key) => {
                     bail!("Reserved key {}", key);
                 }
                 _ => match extensions.entry(key) {
                     Vacant(entry) => {
                         entry.insert(value);
+                        continue;
                     }
                     Occupied(entry) => {
                         bail!("Duplicate values for {}: {:?} and {:?}", key, entry.get(), value)
                     }
                 },
             };
+            match field.get() {
+                Some(existing) => {
+                    bail!("duplicate values for {}: {:?} and {:?}", field.name(), existing, value)
+                }
+                None => field.set(value),
+            }
         } else {
             bail!("Invalid key: {:?}", key);
         }
@@ -266,6 +290,7 @@ fn config_desc_from_slice(session: &Session, bytes: &[u8]) -> Result<ConfigDesc>
             validate_version(session, component_version).context("Component version")?,
         )
         .resettable(resettable.is_null().context("Resettable")?)
+        .security_version(security_version.into_optional_u64().context("Security version")?)
         .build())
 }
 
@@ -307,7 +332,7 @@ mod tests {
         pub(in super::super) fn to_cbor_value(&self) -> Result<Value> {
             let subject_public_key =
                 self.subject_public_key().to_cose_key()?.to_vec().map_err(cose_error)?;
-            let config_desc = serialize(encode_config_desc(self.config_desc()));
+            let config_desc = serialize(self.config_desc().to_cbor_value());
             let mut map = vec![
                 (Value::from(ISS), Value::from(self.issuer())),
                 (Value::from(SUB), Value::from(self.subject())),
@@ -331,6 +356,31 @@ mod tests {
         }
     }
 
+    impl ConfigDesc {
+        pub(in super::super) fn to_cbor_value(&self) -> Value {
+            let mut map = Vec::new();
+            if let Some(component_name) = self.component_name() {
+                map.push((Value::from(COMPONENT_NAME), Value::from(component_name)));
+            }
+            if let Some(component_version) = self.component_version() {
+                map.push((
+                    Value::from(COMPONENT_VERSION),
+                    match component_version {
+                        ComponentVersion::Integer(n) => Value::from(*n),
+                        ComponentVersion::String(s) => Value::from(s.as_str()),
+                    },
+                ))
+            }
+            if self.resettable() {
+                map.push((Value::from(RESETTABLE), Value::Null));
+            }
+            if let Some(security_version) = self.security_version() {
+                map.push((Value::from(SECURITY_VERSION), Value::from(security_version)));
+            }
+            Value::Map(map)
+        }
+    }
+
     fn encode_mode(mode: DiceMode) -> Value {
         let mode = match mode {
             DiceMode::NotConfigured => 0,
@@ -341,28 +391,34 @@ mod tests {
         Value::Bytes(vec![mode])
     }
 
-    fn encode_config_desc(config_desc: &ConfigDesc) -> Value {
-        let mut map = Vec::new();
-        if let Some(component_name) = config_desc.component_name() {
-            map.push((Value::from(COMPONENT_NAME), Value::from(component_name)));
-        }
-        if let Some(component_version) = config_desc.component_version() {
-            map.push((
-                Value::from(COMPONENT_VERSION),
-                match component_version {
-                    ComponentVersion::Integer(n) => Value::from(*n),
-                    ComponentVersion::String(s) => Value::from(s.as_str()),
-                },
-            ))
-        }
-        if config_desc.resettable() {
-            map.push((Value::from(RESETTABLE), Value::Null));
-        }
-        Value::Map(map)
+    #[test]
+    fn valid_payload_sha256() {
+        let config_desc = serialize(cbor!({COMPONENT_NAME => "sha256 test"}).unwrap());
+        let config_hash = sha256(&config_desc).to_vec();
+        let mut fields = valid_payload_fields();
+        fields.insert(CODE_HASH, Value::Bytes(vec![1; 32]));
+        fields.insert(CONFIG_DESC, Value::Bytes(config_desc));
+        fields.insert(CONFIG_HASH, Value::Bytes(config_hash));
+        fields.insert(AUTHORITY_HASH, Value::Bytes(vec![2; 32]));
+        let session = Session { options: Options::default() };
+        Payload::from_cbor(&session, &serialize_fields(fields), ConfigFormat::Android).unwrap();
     }
 
     #[test]
-    fn valid_payload() {
+    fn valid_payload_sha384() {
+        let config_desc = serialize(cbor!({COMPONENT_NAME => "sha384 test"}).unwrap());
+        let config_hash = sha384(&config_desc).to_vec();
+        let mut fields = valid_payload_fields();
+        fields.insert(CODE_HASH, Value::Bytes(vec![1; 48]));
+        fields.insert(CONFIG_DESC, Value::Bytes(config_desc));
+        fields.insert(CONFIG_HASH, Value::Bytes(config_hash));
+        fields.insert(AUTHORITY_HASH, Value::Bytes(vec![2; 48]));
+        let session = Session { options: Options::default() };
+        Payload::from_cbor(&session, &serialize_fields(fields), ConfigFormat::Android).unwrap();
+    }
+
+    #[test]
+    fn valid_payload_sha512() {
         let fields = valid_payload_fields();
         let session = Session { options: Options::default() };
         Payload::from_cbor(&session, &serialize_fields(fields), ConfigFormat::Android).unwrap();
@@ -554,7 +610,9 @@ mod tests {
     fn config_desc_custom_field_above() {
         let mut fields = valid_payload_fields();
         let config_desc = serialize(cbor!({-69999 => "custom"}).unwrap());
+        let config_hash = sha512(&config_desc).to_vec();
         fields.insert(CONFIG_DESC, Value::Bytes(config_desc));
+        fields.insert(CONFIG_HASH, Value::Bytes(config_hash));
         let session = Session { options: Options::default() };
         Payload::from_cbor(&session, &serialize_fields(fields), ConfigFormat::Android).unwrap();
     }
@@ -563,7 +621,9 @@ mod tests {
     fn config_desc_reserved_field_max() {
         let mut fields = valid_payload_fields();
         let config_desc = serialize(cbor!({-70000 => "reserved"}).unwrap());
+        let config_hash = sha512(&config_desc).to_vec();
         fields.insert(CONFIG_DESC, Value::Bytes(config_desc));
+        fields.insert(CONFIG_HASH, Value::Bytes(config_hash));
         let session = Session { options: Options::default() };
         Payload::from_cbor(&session, &serialize_fields(fields), ConfigFormat::Android).unwrap_err();
     }
@@ -572,7 +632,9 @@ mod tests {
     fn config_desc_reserved_field_min() {
         let mut fields = valid_payload_fields();
         let config_desc = serialize(cbor!({-70999 => "reserved"}).unwrap());
+        let config_hash = sha512(&config_desc).to_vec();
         fields.insert(CONFIG_DESC, Value::Bytes(config_desc));
+        fields.insert(CONFIG_HASH, Value::Bytes(config_hash));
         let session = Session { options: Options::default() };
         Payload::from_cbor(&session, &serialize_fields(fields), ConfigFormat::Android).unwrap_err();
     }
@@ -581,7 +643,9 @@ mod tests {
     fn config_desc_custom_field_below() {
         let mut fields = valid_payload_fields();
         let config_desc = serialize(cbor!({-71000 => "custom"}).unwrap());
+        let config_hash = sha512(&config_desc).to_vec();
         fields.insert(CONFIG_DESC, Value::Bytes(config_desc));
+        fields.insert(CONFIG_HASH, Value::Bytes(config_hash));
         let session = Session { options: Options::default() };
         Payload::from_cbor(&session, &serialize_fields(fields), ConfigFormat::Android).unwrap();
     }
@@ -601,7 +665,9 @@ mod tests {
     fn config_desc_component_version_string() {
         let mut fields = valid_payload_fields();
         let config_desc = serialize(cbor!({COMPONENT_VERSION => "It's version 4"}).unwrap());
+        let config_hash = sha512(&config_desc).to_vec();
         fields.insert(CONFIG_DESC, Value::Bytes(config_desc));
+        fields.insert(CONFIG_HASH, Value::Bytes(config_hash));
         let cbor = serialize_fields(fields);
         let session = Session {
             options: Options {
@@ -616,6 +682,55 @@ mod tests {
             payload.config_desc().component_version(),
             Some(&ComponentVersion::String("It's version 4".to_string()))
         );
+    }
+
+    #[test]
+    fn config_desc_security_version() {
+        let mut fields = valid_payload_fields();
+        let config_desc = serialize(cbor!({SECURITY_VERSION => Value::from(0x12345678)}).unwrap());
+        let config_hash = sha512(&config_desc).to_vec();
+        fields.insert(CONFIG_DESC, Value::Bytes(config_desc));
+        fields.insert(CONFIG_HASH, Value::Bytes(config_hash));
+        let cbor = serialize_fields(fields);
+        let session = Session { options: Options::default() };
+        let payload = Payload::from_cbor(&session, &cbor, ConfigFormat::Android).unwrap();
+        assert_eq!(payload.config_desc().security_version(), Some(0x12345678));
+    }
+
+    #[test]
+    fn config_desc_security_version_fixed_size_encoding() {
+        let mut fields = valid_payload_fields();
+        let config_desc = vec![
+            0xa1, // Map of one element.
+            0x3a, 0x00, 0x01, 0x11, 0x74, // SECURITY_VERSION.
+            0x1a, 0x00, 0x00, 0xca, 0xfe, // Non-deterministic encoding of 0xcafe.
+        ];
+        let config_hash = sha512(&config_desc).to_vec();
+        fields.insert(CONFIG_DESC, Value::Bytes(config_desc));
+        fields.insert(CONFIG_HASH, Value::Bytes(config_hash));
+        let cbor = serialize_fields(fields);
+        let session = Session { options: Options::default() };
+        let payload = Payload::from_cbor(&session, &cbor, ConfigFormat::Android).unwrap();
+        assert_eq!(payload.config_desc().security_version(), Some(0xcafe));
+    }
+
+    #[test]
+    fn config_desc_security_version_negative() {
+        let mut fields = valid_payload_fields();
+        let config_desc = serialize(cbor!({SECURITY_VERSION => Value::from(-12)}).unwrap());
+        fields.insert(CONFIG_DESC, Value::Bytes(config_desc));
+        let cbor = serialize_fields(fields);
+        let session = Session { options: Options::default() };
+        Payload::from_cbor(&session, &cbor, ConfigFormat::Android).unwrap_err();
+    }
+
+    #[test]
+    fn config_hash_missing() {
+        let mut fields = valid_payload_fields();
+        fields.remove(&CONFIG_HASH);
+        let cbor = serialize_fields(fields);
+        let session = Session { options: Options::default() };
+        Payload::from_cbor(&session, &cbor, ConfigFormat::Android).unwrap_err();
     }
 
     #[test]
@@ -646,6 +761,7 @@ mod tests {
         let key = PrivateKey::from_pem(ED25519_KEY_PEM[0]).public_key();
         let subject_public_key = key.to_cose_key().unwrap().to_vec().unwrap();
         let config_desc = serialize(cbor!({COMPONENT_NAME => "component name"}).unwrap());
+        let config_hash = sha512(&config_desc).to_vec();
         HashMap::from([
             (ISS, Value::from("issuer")),
             (SUB, Value::from("subject")),
@@ -653,6 +769,7 @@ mod tests {
             (KEY_USAGE, Value::Bytes(vec![0x20])),
             (CODE_HASH, Value::Bytes(vec![1; 64])),
             (CONFIG_DESC, Value::Bytes(config_desc)),
+            (CONFIG_HASH, Value::Bytes(config_hash)),
             (AUTHORITY_HASH, Value::Bytes(vec![2; 64])),
             (MODE, Value::Bytes(vec![0])),
         ])
