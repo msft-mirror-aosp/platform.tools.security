@@ -16,9 +16,11 @@ package {
     default_applicable_licenses: ["Android-Apache-2.0"],
 }
 
-java_fuzz_host {
+java_fuzz {
     name: "s2_cell_id_fuzzer",
     srcs: ["S2CellIdFuzzer.java"],
+    host_supported: true,
+    device_supported: false,
     static_libs: [
         "jazzer",
         "s2-geometry-library-java",
