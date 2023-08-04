@@ -1,6 +1,7 @@
 //! Defines the context type for a session handling hwtrust data structures.
 
 /// The context for a session handling hwtrust data structures.
+#[derive(Default)]
 pub struct Session {
     /// Options that control the behaviour during this session.
     pub options: Options,
@@ -110,6 +111,11 @@ impl Options {
 
     /// The options use by VSR 15.
     pub fn vsr15() -> Self {
+        Self { dice_chain_config_hash_unverified: true, ..Options::default() }
+    }
+
+    /// The options use by VSR 16.
+    pub fn vsr16() -> Self {
         Options::default()
     }
 }

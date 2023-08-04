@@ -8,11 +8,14 @@ rust_defaults {
     srcs: ["src/lib.rs"],
     rustlibs: [
         "libanyhow",
-        "libthiserror",
+        "libbase64_rust",
         "libciborium",
         "libcoset",
         "libhex",
+        "libitertools",
         "libopenssl",
+        "libserde_json",
+        "libthiserror",
     ],
 }
 
