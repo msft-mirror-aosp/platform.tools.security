@@ -18,7 +18,7 @@
 use libfuzzer_sys::fuzz_target;
 
 fn heap_oob() {
-    let xs = vec![0, 1, 2, 3];
+    let xs = [0, 1, 2, 3];
     // SAFETY: This is in fact intentionally unsound, but we hope the fuzzer will catch it.
     let val = unsafe { *xs.as_ptr().offset(4) };
     println!("Out-of-bounds heap value: {}", val);
