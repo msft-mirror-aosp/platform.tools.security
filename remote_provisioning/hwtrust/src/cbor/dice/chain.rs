@@ -1,10 +1,10 @@
-use super::cose_key_from_cbor_value;
-use super::entry::Entry;
+use super::entry::{ConfigFormat, Entry};
+use super::{cose_key_from_cbor_value, KeyOpsType};
 use crate::cbor::dice::entry::PayloadFields;
 use crate::cbor::value_from_bytes;
-use crate::dice::{Chain, ChainForm, DegenerateChain, Payload};
+use crate::dice::{Chain, ChainForm, DegenerateChain, Payload, ProfileVersion};
 use crate::publickey::PublicKey;
-use crate::session::{ConfigFormat, Session};
+use crate::session::Session;
 use anyhow::{bail, Context, Result};
 use ciborium::value::Value;
 
@@ -12,7 +12,15 @@ impl ChainForm {
     /// Decode and validate a CBOR-encoded DICE chain. The form of chain is inferred from the
     /// structure of the data.
     pub fn from_cbor(session: &Session, bytes: &[u8]) -> Result<Self> {
-        let (root_public_key, it) = root_and_entries_from_cbor(session, bytes)?;
+        Self::from_value(
+            session,
+            value_from_bytes(bytes).context("Unable to decode top-level CBOR")?,
+        )
+    }
+
+    /// Similar to `from_cbor`, except it accepts an already-parsed Value instead of raw CBOR.
+    pub fn from_value(session: &Session, value: Value) -> Result<Self> {
+        let (root_public_key, it) = root_and_entries_from_value(session, value)?;
 
         if it.len() == 1 {
             // The chain could be degenerate so interpret it as such until it's seen to be more
@@ -42,7 +50,16 @@ impl Chain {
     /// extracted. This does not perform any semantic validation of the data in the
     /// certificates such as the Authority, Config and Code hashes.
     pub fn from_cbor(session: &Session, bytes: &[u8]) -> Result<Self> {
-        let (root_public_key, it) = root_and_entries_from_cbor(session, bytes)?;
+        Self::from_value(
+            session,
+            value_from_bytes(bytes).context("Unable to decode top-level CBOR")?,
+        )
+    }
+
+    /// Decode and validate a Chain from a parsed CBOR Value. This is functionally similar
+    /// to `Self::from_cbor`, except that it accepts an already-parsed CBOR Value.
+    pub fn from_value(session: &Session, value: Value) -> Result<Self> {
+        let (root_public_key, it) = root_and_entries_from_value(session, value)?;
         Self::from_root_and_entries(session, root_public_key, it)
     }
 
@@ -56,10 +73,13 @@ impl Chain {
         for (n, value) in values.enumerate() {
             let entry = Entry::verify_cbor_value(value, previous_public_key)
                 .with_context(|| format!("Invalid entry at index {}", n))?;
-            let config_format = if n == 0 {
-                session.options.first_dice_chain_cert_config_format
+            let config_format = if n == 0
+                && session.options.dice_profile_range.contains(ProfileVersion::Android14)
+            {
+                // Context: b/261647022
+                ConfigFormat::AndroidOrIgnored
             } else {
-                ConfigFormat::Android
+                ConfigFormat::default()
             };
             let payload = Payload::from_cbor(session, entry.payload(), config_format)
                 .with_context(|| format!("Invalid payload at index {}", n))?;
@@ -71,17 +91,22 @@ impl Chain {
     }
 }
 
-fn root_and_entries_from_cbor(
+fn root_and_entries_from_value(
     session: &Session,
-    bytes: &[u8],
+    value: Value,
 ) -> Result<(PublicKey, std::vec::IntoIter<Value>)> {
-    let value = value_from_bytes(bytes).context("Unable to decode top-level CBOR")?;
     let array = match value {
         Value::Array(array) if array.len() >= 2 => array,
         _ => bail!("Expected an array of at least length 2, found: {:?}", value),
     };
     let mut it = array.into_iter();
-    let root_public_key = cose_key_from_cbor_value(session, it.next().unwrap())
+    let key_ops_type = if session.options.dice_profile_range.contains(ProfileVersion::Android13) {
+        // Context: b/262599829#comment65
+        KeyOpsType::IntOrArray
+    } else {
+        KeyOpsType::default()
+    };
+    let root_public_key = cose_key_from_cbor_value(it.next().unwrap(), key_ops_type)
         .context("Error parsing root public key CBOR")?;
     let root_public_key = PublicKey::from_cose_key(&root_public_key).context("Invalid root key")?;
     Ok((root_public_key, it))
@@ -93,7 +118,7 @@ mod tests {
     use crate::cbor::serialize;
     use crate::dice::{ConfigDesc, DiceMode, PayloadBuilder};
     use crate::publickey::testkeys::{PrivateKey, ED25519_KEY_PEM, P256_KEY_PEM, P384_KEY_PEM};
-    use crate::session::{KeyOpsType, Options};
+    use crate::session::Options;
     use ciborium::cbor;
     use coset::iana::{self, EnumI64};
     use coset::AsCborValue;
@@ -125,13 +150,35 @@ mod tests {
     }
 
     #[test]
+    fn check_chain_valid_ed25519_value() {
+        let chain = fs::read("testdata/dice/valid_ed25519.chain").unwrap();
+        let chain = value_from_bytes(&chain).unwrap();
+        let session = Session { options: Options::default() };
+        let chain = Chain::from_value(&session, chain).unwrap();
+        assert_eq!(chain.payloads().len(), 8);
+    }
+
+    #[test]
     fn check_chain_valid_p256() {
         let chain = fs::read("testdata/dice/valid_p256.chain").unwrap();
-        let session = Session {
-            options: Options { dice_chain_config_hash_unverified: true, ..Options::default() },
-        };
+        let session = Session { options: Options::default() };
         let chain = Chain::from_cbor(&session, &chain).unwrap();
         assert_eq!(chain.payloads().len(), 3);
+    }
+
+    #[test]
+    fn check_chain_valid_p256_value() {
+        let chain = fs::read("testdata/dice/valid_p256.chain").unwrap();
+        let chain = value_from_bytes(&chain).unwrap();
+        let session = Session { options: Options::default() };
+        let chain = Chain::from_value(&session, chain).unwrap();
+        assert_eq!(chain.payloads().len(), 3);
+    }
+
+    #[test]
+    fn check_chain_wrong_value_type() {
+        let session = Session { options: Options::default() };
+        Chain::from_value(&session, Value::Float(1.234)).unwrap_err();
     }
 
     #[test]
@@ -202,12 +249,7 @@ mod tests {
         let cbor = serialize(Value::Array(chain));
         let session = Session { options: Options::default() };
         Chain::from_cbor(&session, &cbor).unwrap_err();
-        let session = Session {
-            options: Options {
-                dice_chain_key_ops_type: KeyOpsType::IntOrArray,
-                ..Options::default()
-            },
-        };
+        let session = Session { options: Options::vsr13() };
         Chain::from_cbor(&session, &cbor).unwrap();
     }
 

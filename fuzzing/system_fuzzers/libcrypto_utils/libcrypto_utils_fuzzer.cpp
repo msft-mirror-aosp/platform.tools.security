@@ -20,6 +20,7 @@
 #include <memory>
 #include <openssl/obj_mac.h>
 #include <openssl/rsa.h>
+#include <cassert>
 #include <cstdio>
 #include <limits>
 
