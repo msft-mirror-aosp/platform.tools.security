@@ -18,7 +18,7 @@ pub enum DiceMode {
 }
 
 /// The payload of a DICE chain entry.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct Payload {
     issuer: String,
     subject: String,
@@ -107,18 +107,40 @@ impl Display for Payload {
     }
 }
 
+impl fmt::Debug for Payload {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
+        let mut debug = f.debug_struct("Payload");
+        debug.field("Issuer", &self.issuer);
+        debug.field("Subject", &self.subject);
+        debug.field("Mode", &self.mode);
+        if let Some(code_desc) = &self.code_desc {
+            debug.field("Code Desc", &hex::encode(code_desc));
+        }
+        debug.field("Code Hash", &hex::encode(&self.code_hash));
+        if let Some(config_hash) = &self.config_hash {
+            debug.field("Config Hash", &hex::encode(config_hash));
+        }
+        if let Some(authority_desc) = &self.authority_desc {
+            debug.field("Authority Desc", &hex::encode(authority_desc));
+        }
+        debug.field("Authority Hash", &hex::encode(&self.authority_hash));
+        debug.field("Config Desc", &self.config_desc);
+        debug.finish()
+    }
+}
+
 #[derive(Error, Debug, PartialEq, Eq)]
 pub(crate) enum PayloadBuilderError {
     #[error("issuer empty")]
     IssuerEmpty,
     #[error("subject empty")]
     SubjectEmpty,
-    #[error("bad code hash size")]
-    CodeHashSize,
-    #[error("bad config hash size")]
-    ConfigHashSize,
-    #[error("bad authority hash size")]
-    AuthorityHashSize,
+    #[error("bad code hash size, actual: {0}, expected: 32, 48, or 64")]
+    CodeHashSize(usize),
+    #[error("bad config hash size, actual: {0}, expected: {1}")]
+    ConfigHashSize(usize, usize),
+    #[error("bad authority hash size, actual: {0}, expected: {1}")]
+    AuthorityHashSize(usize, usize),
 }
 
 pub(crate) struct PayloadBuilder(Payload);
@@ -150,15 +172,18 @@ impl PayloadBuilder {
         }
         let used_hash_size = self.0.code_hash.len();
         if ![32, 48, 64].contains(&used_hash_size) {
-            return Err(PayloadBuilderError::CodeHashSize);
+            return Err(PayloadBuilderError::CodeHashSize(used_hash_size));
         }
         if let Some(ref config_hash) = self.0.config_hash {
             if config_hash.len() != used_hash_size {
-                return Err(PayloadBuilderError::ConfigHashSize);
+                return Err(PayloadBuilderError::ConfigHashSize(config_hash.len(), used_hash_size));
             }
         }
         if self.0.authority_hash.len() != used_hash_size {
-            return Err(PayloadBuilderError::AuthorityHashSize);
+            return Err(PayloadBuilderError::AuthorityHashSize(
+                self.0.authority_hash.len(),
+                used_hash_size,
+            ));
         }
         Ok(self.0)
     }
@@ -253,6 +278,7 @@ pub struct ConfigDesc {
     component_version: Option<ComponentVersion>,
     resettable: bool,
     security_version: Option<u64>,
+    rkp_vm_marker: bool,
     extensions: Vec<(String, String)>,
 }
 
@@ -277,6 +303,11 @@ impl ConfigDesc {
         self.security_version
     }
 
+    /// Returns whether the component may be part of an RPK VM.
+    pub fn rkp_vm_marker(&self) -> bool {
+        self.rkp_vm_marker
+    }
+
     /// Return any extensions present in the descriptor.
     pub fn extensions(&self) -> &[(String, String)] {
         &self.extensions
@@ -296,6 +327,9 @@ impl Display for ConfigDesc {
         }
         if let Some(security_version) = &self.security_version {
             writeln!(f, "Security Version: {}", security_version)?;
+        }
+        if self.rkp_vm_marker {
+            writeln!(f, "RKP VM Marker")?;
         }
         for (key, value) in &self.extensions {
             writeln!(f, "{key}: {value}")?;
@@ -342,6 +376,13 @@ impl ConfigDescBuilder {
     #[must_use]
     pub fn security_version(mut self, version: Option<u64>) -> Self {
         self.0.security_version = version;
+        self
+    }
+
+    /// Sets whether the component may be part of an RKP VM.
+    #[must_use]
+    pub fn rkp_vm_marker(mut self, rkp_vm_marker: bool) -> Self {
+        self.0.rkp_vm_marker = rkp_vm_marker;
         self
     }
 
@@ -408,26 +449,26 @@ mod tests {
     #[test]
     fn payload_builder_bad_code_hash_size() {
         let err = valid_payload().code_hash(vec![1; 16]).build().unwrap_err();
-        assert_eq!(err, PayloadBuilderError::CodeHashSize);
+        assert_eq!(err, PayloadBuilderError::CodeHashSize(16));
     }
 
     #[test]
     fn payload_builder_bad_authority_hash_size() {
         let err = valid_payload().authority_hash(vec![1; 16]).build().unwrap_err();
-        assert_eq!(err, PayloadBuilderError::AuthorityHashSize);
+        assert_eq!(err, PayloadBuilderError::AuthorityHashSize(16, 64));
     }
 
     #[test]
     fn payload_builder_inconsistent_authority_hash_size() {
         let err =
             valid_payload().code_hash(vec![1; 32]).authority_hash(vec![1; 64]).build().unwrap_err();
-        assert_eq!(err, PayloadBuilderError::AuthorityHashSize);
+        assert_eq!(err, PayloadBuilderError::AuthorityHashSize(64, 32));
     }
 
     #[test]
     fn payload_builder_bad_config_hash_size() {
         let err = valid_payload().config_hash(Some(vec![1; 16])).build().unwrap_err();
-        assert_eq!(err, PayloadBuilderError::ConfigHashSize);
+        assert_eq!(err, PayloadBuilderError::ConfigHashSize(16, 64));
     }
 
     #[test]
@@ -437,7 +478,7 @@ mod tests {
             .config_hash(Some(vec![1; 32]))
             .build()
             .unwrap_err();
-        assert_eq!(err, PayloadBuilderError::ConfigHashSize);
+        assert_eq!(err, PayloadBuilderError::ConfigHashSize(32, 64));
     }
 
     fn valid_payload() -> PayloadBuilder {
