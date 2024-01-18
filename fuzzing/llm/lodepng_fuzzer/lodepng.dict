@@ -1,0 +1,21 @@
+# PNG file signature
+png_header="89504E470D0A1A0A"
+
+# IHDR chunk
+ihdr_chunk="49484452"
+width="\x00\x00\x02\x00"  # Example width: 512
+height="\x00\x00\x02\x00" # Example height: 512
+bit_depth="\x08"          # 8-bit depth
+color_type="\x06"         # Truecolor with alpha
+compression="\x00"        # Default compression
+filter="\x00"             # Default filter
+interlace="\x00"          # No interlace
+
+# PLTE chunk (Palette)
+plte_chunk="504C5445"
+
+# IDAT chunk (Image Data)
+idat_chunk="49444154"
+
+# IEND chunk (Image End)
+iend_chunk="49454E44"
