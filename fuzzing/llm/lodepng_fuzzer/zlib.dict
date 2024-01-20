@@ -1,4 +1,0 @@
-zlib_header="\x78\x9C"
-zlib_header_default="\x78\xDA"
-zlib_header_best_compression="\x78\xDA"
-zlib_header_best_speed="\x78\x01"
