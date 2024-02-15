@@ -1,14 +1,12 @@
 //! Handling for data represented as CBOR. Cryptographic objects are encoded following COSE.
 
 mod dice;
+mod field_value;
 mod publickey;
+pub(crate) mod rkp;
 
 use ciborium::{de::from_reader, value::Value};
 use std::io::Read;
-
-fn cose_error(ce: coset::CoseError) -> anyhow::Error {
-    anyhow::anyhow!("CoseError: {:?}", ce)
-}
 
 type CiboriumError = ciborium::de::Error<std::io::Error>;
 
