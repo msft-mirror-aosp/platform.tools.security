@@ -110,7 +110,7 @@ impl From<ConfigInput> for Config {
             .with_filter(config_input.get_filter())
             .with_max_level(config_input.log_level.into())
             .with_tag(config_input.tag)
-            .with_log_id(config_input.log_id.into())
+            .with_log_buffer(config_input.log_id.into())
     }
 }
 
