@@ -22,8 +22,8 @@ cc_fuzz {
         description: "Test Fuzzer",
         production_date: "6/8/2019",
         critical: false,
-        fuzz_on_haiku_device: true,
-        fuzz_on_haiku_host: true,
+        fuzz_on_haiku_device: false,
+        fuzz_on_haiku_host: false,
         triage_assignee: "davfu@google.com"
     },
 }
