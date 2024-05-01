@@ -25,6 +25,12 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   auto bytes = stream.ConsumeBytes<uint8_t>(stream.remaining_bytes() / 2);
   void *fdtp = bytes.data();
 
+  int isValidBuffer = fdt_check_full(bytes.data(), bytes.size());
+  // Return if memory bytes are invalid
+  if (isValidBuffer != 0) {
+    return 0;
+  }
+
   fdt32_t *fdt_tag_ptr = (fdt32_t *)fdt_offset_ptr(fdtp, 0, sizeof(fdt32_t));
   struct ufdt_node *node = ufdt_node_construct(fdtp, fdt_tag_ptr, &pool);
 
