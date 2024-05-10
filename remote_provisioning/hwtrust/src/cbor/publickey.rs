@@ -1,6 +1,6 @@
 //! CBOR encoding and decoding of a [`PublicKey`].
 
-use crate::publickey::{EcKind, Kind, PublicKey};
+use crate::publickey::{EcKind, KeyAgreementPublicKey, PublicKey, SignatureKind};
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use coset::cbor::value::Value;
 use coset::iana::{self, EnumI64};
@@ -16,24 +16,20 @@ impl PublicKey {
         if !cose_key.key_ops.is_empty() {
             ensure!(cose_key.key_ops.contains(&KeyOperation::Assigned(iana::KeyOperation::Verify)));
         }
-        let pkey = match cose_key.kty {
-            KeyType::Assigned(iana::KeyType::OKP) => pkey_from_okp_key(cose_key)?,
-            KeyType::Assigned(iana::KeyType::EC2) => pkey_from_ec2_key(cose_key)?,
-            _ => bail!("Unexpected KeyType value: {:?}", cose_key.kty),
-        };
+        let pkey = to_pkey(cose_key)?;
         pkey.try_into().context("Making PublicKey from PKey")
     }
 
     /// Verifies a COSE_Sign1 signature over its message. This function handles the conversion of
     /// the signature format that is needed for some algorithms.
-    pub(in crate::cbor) fn verify_cose_sign1(&self, sign1: &CoseSign1) -> Result<()> {
+    pub(in crate::cbor) fn verify_cose_sign1(&self, sign1: &CoseSign1, aad: &[u8]) -> Result<()> {
         ensure!(sign1.protected.header.crit.is_empty(), "No critical headers allowed");
         ensure!(
             sign1.protected.header.alg == Some(Algorithm::Assigned(iana_algorithm(self.kind()))),
             "Algorithm mistmatch in protected header"
         );
-        sign1.verify_signature(b"", |signature, message| match self.kind() {
-            Kind::Ec(k) => {
+        sign1.verify_signature(aad, |signature, message| match self.kind() {
+            SignatureKind::Ec(k) => {
                 let der = ec_cose_signature_to_der(k, signature).context("Signature to DER")?;
                 self.verify(&der, message)
             }
@@ -44,7 +40,7 @@ impl PublicKey {
     /// Convert the public key into a [`CoseKey`].
     pub fn to_cose_key(&self) -> Result<CoseKey> {
         let builder = match self.kind() {
-            Kind::Ed25519 => {
+            SignatureKind::Ed25519 => {
                 let label_crv = iana::OkpKeyParameter::Crv.to_i64();
                 let label_x = iana::OkpKeyParameter::X.to_i64();
                 let x = self.pkey().raw_public_key().context("Get ed25519 raw public key")?;
@@ -52,7 +48,7 @@ impl PublicKey {
                     .param(label_crv, Value::from(iana::EllipticCurve::Ed25519.to_i64()))
                     .param(label_x, Value::from(x))
             }
-            Kind::Ec(ec) => {
+            SignatureKind::Ec(ec) => {
                 let key = self.pkey().ec_key().unwrap();
                 let group = key.group();
                 let mut ctx = BigNumContext::new().context("Failed to create bignum context")?;
@@ -61,11 +57,14 @@ impl PublicKey {
                 key.public_key()
                     .affine_coordinates_gfp(group, &mut x, &mut y, &mut ctx)
                     .context("Get EC coordinates")?;
-                let crv = match ec {
-                    EcKind::P256 => iana::EllipticCurve::P_256,
-                    EcKind::P384 => iana::EllipticCurve::P_384,
+                let (crv, coord_len) = match ec {
+                    EcKind::P256 => (iana::EllipticCurve::P_256, 32),
+                    EcKind::P384 => (iana::EllipticCurve::P_384, 48),
                 };
-                CoseKeyBuilder::new_ec2_pub_key(crv, x.to_vec(), y.to_vec())
+
+                let x = adjust_coord(x.to_vec(), coord_len)?;
+                let y = adjust_coord(y.to_vec(), coord_len)?;
+                CoseKeyBuilder::new_ec2_pub_key(crv, x, y)
             }
         };
         Ok(builder
@@ -75,13 +74,57 @@ impl PublicKey {
     }
 }
 
+impl KeyAgreementPublicKey {
+    pub(super) fn from_cose_key(cose_key: &CoseKey) -> Result<Self> {
+        // RFC 9052 says the key_op for derive key is only for private keys. The public key
+        // has no key_ops (see Appendix B for an example).
+        ensure!(cose_key.key_ops.is_empty());
+        let pkey = to_pkey(cose_key)?;
+        pkey.try_into().context("Making KeyAgreementPublicKey from PKey")
+    }
+}
+
+fn to_pkey(cose_key: &CoseKey) -> Result<PKey<Public>> {
+    match cose_key.kty {
+        KeyType::Assigned(iana::KeyType::OKP) => Ok(pkey_from_okp_key(cose_key)?),
+        KeyType::Assigned(iana::KeyType::EC2) => Ok(pkey_from_ec2_key(cose_key)?),
+        _ => bail!("Unexpected KeyType value: {:?}", cose_key.kty),
+    }
+}
+
+fn adjust_coord(mut coordinate: Vec<u8>, length: usize) -> Result<Vec<u8>> {
+    // Use loops "just in case". However we should never see a coordinate with more than one
+    // extra leading byte. The chances of more than one trailing byte is also quite small --
+    // roughly 1/65000.
+    while coordinate.len() > length {
+        ensure!(coordinate[0] == 0, "unexpected non-zero leading byte on public key");
+        coordinate.remove(0);
+    }
+
+    while coordinate.len() < length {
+        coordinate.insert(0, 0);
+    }
+
+    Ok(coordinate)
+}
+
 fn pkey_from_okp_key(cose_key: &CoseKey) -> Result<PKey<Public>> {
     ensure!(cose_key.kty == KeyType::Assigned(iana::KeyType::OKP));
-    ensure!(cose_key.alg == Some(Algorithm::Assigned(iana::Algorithm::EdDSA)));
+    ensure!(
+        cose_key.alg == Some(Algorithm::Assigned(iana::Algorithm::EdDSA))
+            || cose_key.alg == Some(Algorithm::Assigned(iana::Algorithm::ECDH_ES_HKDF_256))
+    );
+    //ensure!(cose_key.alg == Some(Algorithm::Assigned(iana::Algorithm::EdDSA)));
     let crv = get_label_value(cose_key, Label::Int(iana::OkpKeyParameter::Crv.to_i64()))?;
     let x = get_label_value_as_bytes(cose_key, Label::Int(iana::OkpKeyParameter::X.to_i64()))?;
-    ensure!(crv == &Value::from(iana::EllipticCurve::Ed25519.to_i64()));
-    PKey::public_key_from_raw_bytes(x, Id::ED25519).context("Failed to instantiate key")
+    let curve_id = if crv == &Value::from(iana::EllipticCurve::Ed25519.to_i64()) {
+        Id::ED25519
+    } else if crv == &Value::from(iana::EllipticCurve::X25519.to_i64()) {
+        Id::X25519
+    } else {
+        bail!("Given crv is invalid: '{crv:?}'");
+    };
+    PKey::public_key_from_raw_bytes(x, curve_id).context("Failed to instantiate key")
 }
 
 fn pkey_from_ec2_key(cose_key: &CoseKey) -> Result<PKey<Public>> {
@@ -90,7 +133,8 @@ fn pkey_from_ec2_key(cose_key: &CoseKey) -> Result<PKey<Public>> {
     let x = get_label_value_as_bytes(cose_key, Label::Int(iana::Ec2KeyParameter::X.to_i64()))?;
     let y = get_label_value_as_bytes(cose_key, Label::Int(iana::Ec2KeyParameter::Y.to_i64()))?;
     match cose_key.alg {
-        Some(Algorithm::Assigned(iana::Algorithm::ES256)) => {
+        Some(Algorithm::Assigned(iana::Algorithm::ES256))
+        | Some(Algorithm::Assigned(iana::Algorithm::ECDH_ES_HKDF_256)) => {
             ensure!(crv == &Value::from(iana::EllipticCurve::P_256.to_i64()));
             pkey_from_ec_coords(Nid::X9_62_PRIME256V1, x, y).context("Failed to instantiate key")
         }
@@ -98,7 +142,7 @@ fn pkey_from_ec2_key(cose_key: &CoseKey) -> Result<PKey<Public>> {
             ensure!(crv == &Value::from(iana::EllipticCurve::P_384.to_i64()));
             pkey_from_ec_coords(Nid::SECP384R1, x, y).context("Failed to instantiate key")
         }
-        _ => bail!("Need to specify ES256 or ES384 in the key. Got {:?}", cose_key.alg),
+        _ => bail!("Need to specify ES256 or ES384 key algorithm. Got {:?}", cose_key.alg),
     }
 }
 
@@ -147,18 +191,21 @@ fn ec_coord_len(kind: EcKind) -> usize {
     }
 }
 
-fn iana_algorithm(kind: Kind) -> iana::Algorithm {
+fn iana_algorithm(kind: SignatureKind) -> iana::Algorithm {
     match kind {
-        Kind::Ed25519 => iana::Algorithm::EdDSA,
-        Kind::Ec(EcKind::P256) => iana::Algorithm::ES256,
-        Kind::Ec(EcKind::P384) => iana::Algorithm::ES384,
+        SignatureKind::Ed25519 => iana::Algorithm::EdDSA,
+        SignatureKind::Ec(EcKind::P256) => iana::Algorithm::ES256,
+        SignatureKind::Ec(EcKind::P384) => iana::Algorithm::ES384,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::publickey::testkeys::{PrivateKey, ED25519_KEY_PEM, P256_KEY_PEM};
+    use crate::publickey::testkeys::{
+        PrivateKey, ED25519_KEY_PEM, P256_KEY_PEM, P256_KEY_WITH_LEADING_ZEROS_PEM,
+        P384_KEY_WITH_LEADING_ZEROS_PEM,
+    };
     use coset::{CoseSign1Builder, HeaderBuilder};
 
     impl PrivateKey {
@@ -169,7 +216,7 @@ mod tests {
                 .create_signature(b"", |m| {
                     let signature = self.sign(m).unwrap();
                     match self.kind() {
-                        Kind::Ec(ec) => ec_der_signature_to_cose(ec, &signature),
+                        SignatureKind::Ec(ec) => ec_der_signature_to_cose(ec, &signature),
                         _ => signature,
                     }
                 })
@@ -190,14 +237,14 @@ mod tests {
     fn sign_and_verify_okp() {
         let key = PrivateKey::from_pem(ED25519_KEY_PEM[0]);
         let sign1 = key.sign_cose_sign1(b"signed payload".to_vec());
-        key.public_key().verify_cose_sign1(&sign1).unwrap();
+        key.public_key().verify_cose_sign1(&sign1, b"").unwrap();
     }
 
     #[test]
     fn sign_and_verify_ec2() {
         let key = PrivateKey::from_pem(P256_KEY_PEM[0]);
         let sign1 = key.sign_cose_sign1(b"signed payload".to_vec());
-        key.public_key().verify_cose_sign1(&sign1).unwrap();
+        key.public_key().verify_cose_sign1(&sign1, b"").unwrap();
     }
 
     #[test]
@@ -206,9 +253,20 @@ mod tests {
         let sign1 = CoseSign1Builder::new()
             .protected(HeaderBuilder::new().algorithm(iana::Algorithm::EdDSA).build())
             .payload(b"the message".to_vec())
-            .create_signature(b"", |m| key.sign(m).unwrap())
+            .create_signature(b"the aad", |m| key.sign(m).unwrap())
             .build();
-        key.public_key().verify_cose_sign1(&sign1).unwrap();
+        key.public_key().verify_cose_sign1(&sign1, b"the aad").unwrap();
+    }
+
+    #[test]
+    fn verify_cose_sign1_fails_with_wrong_aad() {
+        let key = PrivateKey::from_pem(ED25519_KEY_PEM[0]);
+        let sign1 = CoseSign1Builder::new()
+            .protected(HeaderBuilder::new().algorithm(iana::Algorithm::ES256).build())
+            .payload(b"the message".to_vec())
+            .create_signature(b"correct aad", |m| key.sign(m).unwrap())
+            .build();
+        key.public_key().verify_cose_sign1(&sign1, b"bad").unwrap_err();
     }
 
     #[test]
@@ -219,7 +277,7 @@ mod tests {
             .payload(b"the message".to_vec())
             .create_signature(b"", |m| key.sign(m).unwrap())
             .build();
-        key.public_key().verify_cose_sign1(&sign1).unwrap_err();
+        key.public_key().verify_cose_sign1(&sign1, b"").unwrap_err();
     }
 
     #[test]
@@ -235,7 +293,7 @@ mod tests {
             .payload(b"the message".to_vec())
             .create_signature(b"", |m| key.sign(m).unwrap())
             .build();
-        key.public_key().verify_cose_sign1(&sign1).unwrap()
+        key.public_key().verify_cose_sign1(&sign1, b"").unwrap()
     }
 
     #[test]
@@ -251,7 +309,7 @@ mod tests {
             .payload(b"the message".to_vec())
             .create_signature(b"", |m| key.sign(m).unwrap())
             .build();
-        key.public_key().verify_cose_sign1(&sign1).unwrap_err();
+        key.public_key().verify_cose_sign1(&sign1, b"").unwrap_err();
     }
 
     #[test]
@@ -268,5 +326,41 @@ mod tests {
         let value = key.to_cose_key().unwrap();
         let new_key = PublicKey::from_cose_key(&value).unwrap();
         assert!(key.pkey().public_eq(new_key.pkey()));
+    }
+
+    #[test]
+    fn from_p256_pkey_with_leading_zeros() {
+        for pem in P256_KEY_WITH_LEADING_ZEROS_PEM {
+            let key = PrivateKey::from_pem(pem).public_key();
+            let cose_key = key.to_cose_key().unwrap();
+
+            let x =
+                get_label_value_as_bytes(&cose_key, Label::Int(iana::Ec2KeyParameter::X.to_i64()))
+                    .unwrap();
+            assert_eq!(x.len(), 32, "X coordinate is the wrong size\n{}", pem);
+
+            let y =
+                get_label_value_as_bytes(&cose_key, Label::Int(iana::Ec2KeyParameter::Y.to_i64()))
+                    .unwrap();
+            assert_eq!(y.len(), 32, "Y coordinate is the wrong size\n{}", pem);
+        }
+    }
+
+    #[test]
+    fn from_p384_pkey_with_leading_zeros() {
+        for pem in P384_KEY_WITH_LEADING_ZEROS_PEM {
+            let key = PrivateKey::from_pem(pem).public_key();
+            let cose_key = key.to_cose_key().unwrap();
+
+            let x =
+                get_label_value_as_bytes(&cose_key, Label::Int(iana::Ec2KeyParameter::X.to_i64()))
+                    .unwrap();
+            assert_eq!(x.len(), 48, "X coordinate is the wrong size\n{}", pem);
+
+            let y =
+                get_label_value_as_bytes(&cose_key, Label::Int(iana::Ec2KeyParameter::Y.to_i64()))
+                    .unwrap();
+            assert_eq!(y.len(), 48, "Y coordinate is the wrong size\n{}", pem);
+        }
     }
 }

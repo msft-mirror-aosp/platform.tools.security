@@ -12,12 +12,21 @@ struct BoxedDiceChain;
 
 class DiceChain final {
 public:
-  static android::base::Result<DiceChain> verify(const std::vector<uint8_t>& chain) noexcept;
+  enum class Kind {
+    kVsr13,
+    kVsr14,
+    kVsr15,
+    kVsr16,
+  };
+
+  static android::base::Result<DiceChain> Verify(const std::vector<uint8_t>& chain, DiceChain::Kind kind) noexcept;
 
   ~DiceChain();
   DiceChain(DiceChain&&) = default;
 
-  android::base::Result<std::vector<std::vector<uint8_t>>> cose_public_keys() const noexcept;
+  android::base::Result<std::vector<std::vector<uint8_t>>> CosePublicKeys() const noexcept;
+
+  bool IsProper() const noexcept;
 
 private:
   DiceChain(std::unique_ptr<BoxedDiceChain> chain, size_t size) noexcept;
