@@ -5,6 +5,7 @@ use coset::CborSerializable;
 use hwtrust::dice::ChainForm;
 use hwtrust::session::{Options, Session};
 
+#[allow(unsafe_op_in_unsafe_fn)]
 #[cxx::bridge(namespace = "hwtrust::rust")]
 mod ffi {
     /// The set of validation rules to apply.
@@ -13,6 +14,10 @@ mod ffi {
         Vsr13,
         /// The DICE chain specified by VSR 14.
         Vsr14,
+        /// The DICE chain specified by VSR 15.
+        Vsr15,
+        /// The DICE chain specified by VSR 16.
+        Vsr16,
     }
 
     /// The result type used by [`verify_dice_chain()`]. The standard [`Result`] is currently only
@@ -35,6 +40,9 @@ mod ffi {
 
         #[cxx_name = GetDiceChainPublicKey]
         fn get_dice_chain_public_key(chain: &DiceChain, n: usize) -> Vec<u8>;
+
+        #[cxx_name = IsDiceChainProper]
+        fn is_dice_chain_proper(chain: &DiceChain) -> bool;
     }
 }
 
@@ -46,6 +54,8 @@ fn verify_dice_chain(chain: &[u8], kind: ffi::DiceChainKind) -> ffi::VerifyDiceC
         options: match kind {
             ffi::DiceChainKind::Vsr13 => Options::vsr13(),
             ffi::DiceChainKind::Vsr14 => Options::vsr14(),
+            ffi::DiceChainKind::Vsr15 => Options::vsr15(),
+            ffi::DiceChainKind::Vsr16 => Options::vsr16(),
             _ => {
                 return ffi::VerifyDiceChainResult {
                     error: "invalid chain kind".to_string(),
@@ -84,4 +94,15 @@ fn get_dice_chain_public_key(chain: &DiceChain, n: usize) -> Vec<u8> {
         }
     }
     Vec::new()
+}
+
+fn is_dice_chain_proper(chain: &DiceChain) -> bool {
+    if let DiceChain(Some(chain)) = chain {
+        match chain {
+            ChainForm::Proper(_) => true,
+            ChainForm::Degenerate(_) => false,
+        }
+    } else {
+        false
+    }
 }

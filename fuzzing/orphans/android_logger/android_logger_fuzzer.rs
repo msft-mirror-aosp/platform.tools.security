@@ -30,6 +30,18 @@ impl From<LevelInput> for Level {
     }
 }
 
+impl From<LevelInput> for LevelFilter {
+    fn from(l: LevelInput) -> LevelFilter {
+        match l {
+            LevelInput::Error => LevelFilter::Error,
+            LevelInput::Warn => LevelFilter::Warn,
+            LevelInput::Info => LevelFilter::Info,
+            LevelInput::Debug => LevelFilter::Debug,
+            LevelInput::Trace => LevelFilter::Trace,
+        }
+    }
+}
+
 #[derive(Arbitrary, Debug)]
 pub enum LevelFilterInput {
     Off,
@@ -96,9 +108,9 @@ impl From<ConfigInput> for Config {
     fn from(config_input: ConfigInput) -> Config {
         Config::default()
             .with_filter(config_input.get_filter())
-            .with_min_level(config_input.log_level.into())
+            .with_max_level(config_input.log_level.into())
             .with_tag(config_input.tag)
-            .with_log_id(config_input.log_id.into())
+            .with_log_buffer(config_input.log_id.into())
     }
 }
 

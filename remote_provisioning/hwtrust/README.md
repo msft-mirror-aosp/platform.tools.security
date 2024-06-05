@@ -28,7 +28,18 @@ that the signatures verify correctly. To do so, place the CBOR-encoded DICE
 chain in a file, e.g. `chain.bin`, then call the tool.
 
 ```shell
-hwtrust verify-dice-chain chain.bin
+hwtrust dice-chain chain.bin
 ```
 
 The exit code is zero if the chain passed verification and non-zero otherwise.
+
+### Verifying Factory Certificate Signing Requests
+
+The `rkp_factory_extraction_tool` is used in the manufacturing process to capture
+a "CSR" that contains a full DICE chain and other device properties. The `factory-csr`
+subcommand parses and validates the output of `rkp_factory_extraction_tool`.
+
+
+```shell
+hwtrust factory-csr csr.json
+```
