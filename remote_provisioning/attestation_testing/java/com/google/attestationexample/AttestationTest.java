@@ -3,7 +3,6 @@ package com.google.attestationexample;
 import android.os.AsyncTask;
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
-import android.util.Base64;
 import android.util.Log;
 
 import com.google.common.collect.ImmutableSet;
@@ -26,6 +25,7 @@ import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.security.spec.ECGenParameterSpec;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.Set;
@@ -209,13 +209,16 @@ public class AttestationTest extends AsyncTask<Void, String, Void> {
         keyPairGenerator.generateKeyPair();
     }
 
+    private static final byte[] CRLF = new byte[] {'\r', '\n'};
+    private static final Base64.Encoder PEM_ENCODER = Base64.getMimeEncoder(64, CRLF);
+
     private void verifyCertificateSignatures(Certificate[] certChain)
             throws GeneralSecurityException {
 
         for (Certificate cert : certChain) {
-            final byte[] derCert = cert.getEncoded();
-            final String pemCertPre = Base64.encodeToString(derCert, Base64.NO_WRAP);
-            Log.e("****", pemCertPre);
+            Log.e("****", "-----BEGIN CERTIFICATE-----");
+            Log.e("****", PEM_ENCODER.encodeToString(cert.getEncoded()));
+            Log.e("****", "-----END CERTIFICATE-----");
         }
 
         for (int i = 1; i < certChain.length; ++i) {
