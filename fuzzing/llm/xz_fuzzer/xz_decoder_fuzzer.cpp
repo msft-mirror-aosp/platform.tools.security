@@ -45,6 +45,6 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 
     // Call the function under test
     xz_ret result = xz_dec_run(s, &b);
-
+    xz_dec_end(s);
     return 0;  // Non-zero return values are usually reserved for fatal errors
 }
