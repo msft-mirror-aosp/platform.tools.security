@@ -1,6 +1,9 @@
 #include <fuzzer/FuzzedDataProvider.h>
 #include "xz.h"
 
+constexpr size_t kMinSize = 0;
+constexpr size_t kMaxSize = 1000;
+
 // Function to initialize xz_dec structure using xz_dec_init
 struct xz_dec *init_xz_dec(FuzzedDataProvider& stream) {
     // Randomly select a mode from the xz_mode enum
@@ -8,7 +11,8 @@ struct xz_dec *init_xz_dec(FuzzedDataProvider& stream) {
     enum xz_mode mode = stream.PickValueInArray(modes);
 
     // Generate a random dict_max value
-    uint32_t dict_max = stream.ConsumeIntegral<uint32_t>();
+    uint32_t dict_max =
+        stream.ConsumeIntegralInRange<uint32_t>(kMinSize, kMaxSize);
 
     // Initialize the xz_dec structure
     struct xz_dec *s = xz_dec_init(mode, dict_max);
@@ -41,6 +45,6 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 
     // Call the function under test
     xz_ret result = xz_dec_run(s, &b);
-
+    xz_dec_end(s);
     return 0;  // Non-zero return values are usually reserved for fatal errors
 }
