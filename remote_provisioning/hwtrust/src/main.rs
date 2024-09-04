@@ -45,8 +45,11 @@ enum Action {
 /// [1] -- https://cs.android.com/android/platform/superproject/+/master:hardware/interfaces/security/rkp/aidl/android/hardware/security/keymint/IRemotelyProvisionedComponent.aidl
 /// [2] -- https://pigweed.googlesource.com/open-dice/+/refs/heads/main/docs/specification.md
 struct DiceChainArgs {
-    /// Path to a file containing a DICE chain
+    /// Path to a file containing a DICE chain.
     chain: String,
+    /// Allow non-normal DICE chain modes.
+    #[clap(long)]
+    allow_any_mode: bool,
 }
 
 #[derive(Parser)]
@@ -58,6 +61,9 @@ struct FactoryCsrArgs {
     /// rkp_factory_extraction_tool. Each line is interpreted as a separate JSON blob containing
     /// a base64-encoded CSR.
     csr_file: String,
+    /// Allow non-normal DICE chain modes.
+    #[clap(long)]
+    allow_any_mode: bool,
 }
 
 #[derive(Parser)]
@@ -68,6 +74,9 @@ struct FactoryCsrArgs {
 struct CsrArgs {
     /// Path to a file containing a single CSR, encoded as CBOR.
     csr_file: String,
+    /// Allow non-normal DICE chain modes.
+    #[clap(long)]
+    allow_any_mode: bool,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
@@ -125,7 +134,8 @@ fn main() -> Result<()> {
 }
 
 fn verify_dice_chain(args: &Args, sub_args: &DiceChainArgs) -> Result<Option<String>> {
-    let session = session_from_vsr(args.vsr);
+    let mut session = session_from_vsr(args.vsr);
+    session.set_allow_any_mode(sub_args.allow_any_mode);
     let chain = dice::ChainForm::from_cbor(&session, &fs::read(&sub_args.chain)?)?;
     if args.verbose {
         println!("{chain:#?}");
@@ -141,7 +151,8 @@ favor of full DICE chains, rooted in ROM, that measure the system's boot compone
 }
 
 fn parse_factory_csr(args: &Args, sub_args: &FactoryCsrArgs) -> Result<Option<String>> {
-    let session = session_from_vsr(args.vsr);
+    let mut session = session_from_vsr(args.vsr);
+    session.set_allow_any_mode(sub_args.allow_any_mode);
     let input = &fs::File::open(&sub_args.csr_file)?;
     let mut csr_count = 0;
     for line in io::BufReader::new(input).lines() {
@@ -162,7 +173,8 @@ fn parse_factory_csr(args: &Args, sub_args: &FactoryCsrArgs) -> Result<Option<St
 }
 
 fn parse_csr(args: &Args, sub_args: &CsrArgs) -> Result<Option<String>> {
-    let session = session_from_vsr(args.vsr);
+    let mut session = session_from_vsr(args.vsr);
+    session.set_allow_any_mode(sub_args.allow_any_mode);
     let input = &fs::File::open(&sub_args.csr_file)?;
     let csr = rkp::Csr::from_cbor(&session, input)?;
     if args.verbose {
