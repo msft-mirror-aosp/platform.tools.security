@@ -34,6 +34,8 @@
 
 #include <bionic/mte.h>
 
+char global[32] = {};
+
 // crashes if built with -fsanitize={address,hwaddress}
 void test_crash_malloc_overflow() {
   volatile char* heap = reinterpret_cast<volatile char *>(malloc(32));
@@ -55,6 +57,13 @@ void test_crash_stack() {
   volatile char* p_stack = stack;
   p_stack[32] = p_stack[32];
   printf("(HW)ASAN / Stack MTE: Stack Test Failed\n");
+}
+
+// crashes if built with -fsanitize={address,hwaddress,memtag-globals}
+void test_crash_globals() {
+  volatile char* p_global = global;
+  p_global[32] = p_global[32];
+  printf("(HW)ASAN / Globals MTE: Globals Test Failed\n");
 }
 
 void test_crash_pthread_mutex_unlock() {
@@ -207,6 +216,7 @@ int main(int argc, const char** argv) {
     hwasan_failures += test(test_crash_malloc_uaf);
     hwasan_failures += test(test_crash_stack);
     hwasan_failures += test(test_crash_pthread_mutex_unlock);
+    hwasan_failures += test(test_crash_globals);
 
     if (!hwasan_failures)
       printf("HWASAN: OK\n");
@@ -317,6 +327,23 @@ int main(int argc, const char** argv) {
       printf("Stack MTE: OK\n");
 
     failures += stack_mte_failures;
+  }
+
+  if (test_everything || have_option("globals_mte", argv, argc)) {
+    int globals_mte_failures = 0;
+
+    if (!(mte_supported() && !__has_feature(address_sanitizer) &&
+          !__has_feature(hwaddress_sanitizer))) {
+      globals_mte_failures += 1;
+      printf("MTE: Not supported\n");
+    }
+
+    globals_mte_failures += test(test_crash_globals);
+
+    if (!globals_mte_failures)
+      printf("Globals MTE: OK\n");
+
+    failures += globals_mte_failures;
   }
 
   return failures > 0 ? EXIT_FAILURE : EXIT_SUCCESS;
