@@ -1,11 +1,17 @@
+use std::collections::HashMap;
+
 use crate::cbor::field_value::FieldValue;
 use crate::cbor::value_from_bytes;
-use crate::dice::Chain;
+use crate::dice::ChainForm;
 use crate::rkp::{Csr, DeviceInfo, ProtectedData};
 use crate::session::Session;
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use base64::{prelude::BASE64_STANDARD, Engine};
 use ciborium::value::Value;
+use openssl::pkey::Id;
+use openssl::stack::Stack;
+use openssl::x509::store::X509StoreBuilder;
+use openssl::x509::{X509StoreContext, X509};
 
 const VERSION_OR_DEVICE_INFO_INDEX: usize = 0;
 
@@ -92,7 +98,8 @@ impl Csr {
         let signed_data =
             FieldValue::from_optional_value("SignedData", csr.pop()).into_cose_sign1()?;
         let dice_chain =
-            Chain::from_value(session, csr.pop().ok_or(anyhow!("Missing DiceCertChain"))?)?;
+            ChainForm::from_value(session, csr.pop().ok_or(anyhow!("Missing DiceCertChain"))?)?;
+        let uds_certs = FieldValue::from_optional_value("UdsCerts", csr.pop()).into_map()?;
 
         let signed_data_payload = signed_data.payload.context("missing payload in SignedData")?;
         let csr_payload_value = value_from_bytes(&signed_data_payload)
@@ -114,9 +121,101 @@ impl Csr {
         let device_info = FieldValue::from_optional_value("DeviceInfo", csr_payload.pop());
         let _certificate_type =
             FieldValue::from_optional_value("CertificateType", csr_payload.pop());
+        let uds_certs = Self::parse_and_validate_uds_certs(&dice_chain, uds_certs)?;
 
         let device_info = DeviceInfo::from_cbor_values(device_info.into_map()?, Some(3))?;
-        Ok(Self::V3 { device_info, dice_chain })
+        Ok(Self::V3 { device_info, dice_chain, uds_certs })
+    }
+
+    fn parse_and_validate_uds_certs(
+        dice_chain: &ChainForm,
+        uds_certs: Vec<(Value, Value)>,
+    ) -> Result<HashMap<String, Vec<X509>>> {
+        let expected_uds = match dice_chain {
+            ChainForm::Degenerate(chain) => chain.public_key(),
+            ChainForm::Proper(chain) => chain.root_public_key(),
+        }
+        .pkey();
+
+        let mut parsed = HashMap::new();
+        for (signer, der_certs) in uds_certs {
+            let signer = FieldValue::from_value("SignerName", signer).into_string()?;
+            let x509_certs = FieldValue::from_value("UdsCertChain", der_certs)
+                .into_array()?
+                .into_iter()
+                .map(|v| match FieldValue::from_value("X509Certificate", v).into_bytes() {
+                    Ok(b) => X509::from_der(&b).context("Unable to parse DER X509Certificate"),
+                    Err(e) => Err(e).context("Invalid type for X509Certificate"),
+                })
+                .collect::<Result<Vec<X509>>>()?;
+            Self::validate_uds_cert_path(&signer, &x509_certs)?;
+            ensure!(
+                x509_certs.last().unwrap().public_key()?.public_eq(expected_uds),
+                "UdsCert leaf for SignerName '{signer}' does not match the DICE chain root"
+            );
+            ensure!(
+                parsed.insert(signer.clone(), x509_certs).is_none(),
+                "Duplicate signer found: '{signer}'"
+            );
+        }
+        Ok(parsed)
+    }
+
+    fn validate_uds_cert_path(signer: &String, certs: &Vec<X509>) -> Result<()> {
+        ensure!(
+            certs.len() > 1,
+            "Certificate chain for signer '{signer}' is too short: {certs:#?}"
+        );
+
+        for cert in certs {
+            let id = cert.public_key()?.id();
+            ensure!(
+                matches!(id, Id::RSA | Id::EC | Id::ED25519),
+                "Certificate has an unsupported public algorithm id {id:?}"
+            );
+        }
+
+        // OpenSSL wants us to split up root trust anchor, leaf, and intermediates
+        let mut certs_copy = certs.clone();
+        let leaf = certs_copy.pop().unwrap();
+        let mut intermediates = Stack::new()?;
+        while certs_copy.len() > 1 {
+            intermediates.push(certs_copy.pop().unwrap())?;
+        }
+        let root = certs_copy.pop().unwrap();
+
+        let mut root_store_builder = X509StoreBuilder::new()?;
+        root_store_builder.add_cert(root)?;
+        let root_store = root_store_builder.build();
+
+        let mut store = X509StoreContext::new()?;
+        let result = store.init(&root_store, &leaf, &intermediates, |context| {
+            // the with_context function must return Result<T, ErrorStack>, so we have to get
+            // tricky and return Result<Result<()>, ErrorStack> so we can bubble up custom errors.
+            match context.verify_cert() {
+                Ok(true) => (),
+                Ok(false) => return Ok(Err(anyhow!("Cert failed to verify: {}", context.error()))),
+                Err(e) => return Err(e),
+            };
+
+            if let Some(chain) = context.chain() {
+                // OpenSSL returns the leaf at the bottom of the stack.
+                if !chain.iter().rev().eq(certs.iter()) {
+                    let chain: Vec<_> = chain.iter().rev().map(|r| r.to_owned()).collect();
+                    return Ok(Err(anyhow!(
+                        "Verified chain doesn't match input: {chain:#?} vs {certs:#?}"
+                    )));
+                }
+            } else {
+                return Ok(Err(anyhow!("Cert chain is missing (impossible!)")));
+            }
+            Ok(Ok(()))
+        });
+
+        match result {
+            Ok(e) => e,
+            Err(e) => bail!("Error verifying cert chain: {e:?}"),
+        }
     }
 }
 
@@ -129,6 +228,7 @@ mod tests {
     use crate::cbor::rkp::csr::testutil::{parse_pem_public_key_or_panic, test_device_info};
     use crate::dice::{ChainForm, DegenerateChain, DiceMode};
     use crate::rkp::DeviceInfoVersion;
+    use crate::session::{Options, Session};
     use std::fs;
 
     #[test]
@@ -155,33 +255,47 @@ mod tests {
     fn from_base64_valid_v3() {
         let input = fs::read_to_string("testdata/csr/v3_csr.base64").unwrap().trim().to_owned();
         let csr = Csr::from_base64_cbor(&Session::default(), &input).unwrap();
-        if let Csr::V3 { device_info, dice_chain } = csr {
+        if let Csr::V3 { device_info, dice_chain, uds_certs } = csr {
             assert_eq!(device_info, test_device_info(DeviceInfoVersion::V3));
             let root_public_key = parse_pem_public_key_or_panic(
                 "-----BEGIN PUBLIC KEY-----\n\
                 MCowBQYDK2VwAyEA3FEn/nhqoGOKNok1AJaLfTKI+aFXHf4TfC42vUyPU6s=\n\
                 -----END PUBLIC KEY-----\n",
             );
-            assert_eq!(dice_chain.root_public_key(), &root_public_key);
-            let payloads = dice_chain.payloads();
-            assert_eq!(payloads.len(), 1);
-            assert_eq!(payloads[0].issuer(), "issuer");
-            assert_eq!(payloads[0].subject(), "subject");
-            assert_eq!(payloads[0].mode(), DiceMode::Normal);
-            assert_eq!(payloads[0].code_hash(), &[0x55; 32]);
-            let expected_config_hash: &[u8] =
-                b"\xb8\x96\x54\xe2\x2c\xa4\xd2\x4a\x9c\x0e\x45\x11\xc8\xf2\x63\xf0\
-                  \x66\x0d\x2e\x20\x48\x96\x90\x14\xf4\x54\x63\xc4\xf4\x39\x30\x38";
-            assert_eq!(payloads[0].config_hash(), Some(expected_config_hash));
-            assert_eq!(payloads[0].authority_hash(), &[0x55; 32]);
-            assert_eq!(payloads[0].config_desc().component_name(), Some("component_name"));
-            assert_eq!(payloads[0].config_desc().component_version(), None);
-            assert!(!payloads[0].config_desc().resettable());
-            assert_eq!(payloads[0].config_desc().security_version(), None);
-            assert_eq!(payloads[0].config_desc().extensions(), []);
+            match dice_chain {
+                ChainForm::Proper(proper_chain) => {
+                    assert_eq!(proper_chain.root_public_key(), &root_public_key);
+                    let payloads = proper_chain.payloads();
+                    assert_eq!(payloads.len(), 1);
+                    assert_eq!(payloads[0].issuer(), "issuer");
+                    assert_eq!(payloads[0].subject(), "subject");
+                    assert_eq!(payloads[0].mode(), DiceMode::Normal);
+                    assert_eq!(payloads[0].code_hash(), &[0x55; 32]);
+                    let expected_config_hash: &[u8] =
+                        b"\xb8\x96\x54\xe2\x2c\xa4\xd2\x4a\x9c\x0e\x45\x11\xc8\xf2\x63\xf0\
+                          \x66\x0d\x2e\x20\x48\x96\x90\x14\xf4\x54\x63\xc4\xf4\x39\x30\x38";
+                    assert_eq!(payloads[0].config_hash(), Some(expected_config_hash));
+                    assert_eq!(payloads[0].authority_hash(), &[0x55; 32]);
+                    assert_eq!(payloads[0].config_desc().component_name(), Some("component_name"));
+                    assert_eq!(payloads[0].config_desc().component_version(), None);
+                    assert!(!payloads[0].config_desc().resettable());
+                    assert_eq!(payloads[0].config_desc().security_version(), None);
+                    assert_eq!(payloads[0].config_desc().extensions(), []);
+                }
+                ChainForm::Degenerate(d) => panic!("Parsed chain is not proper: {:?}", d),
+            }
+            assert_eq!(uds_certs.len(), 0);
         } else {
             panic!("Parsed CSR was not V3: {:?}", csr);
         }
+    }
+
+    #[test]
+    fn from_cbor_valid_v3_with_degenerate_chain() -> anyhow::Result<()> {
+        let cbor = fs::read("testdata/csr/v3_csr_degenerate_chain.cbor")?;
+        let session = Session { options: Options::vsr16() };
+        Csr::from_cbor(&session, cbor.as_slice())?;
+        Ok(())
     }
 
     #[test]
