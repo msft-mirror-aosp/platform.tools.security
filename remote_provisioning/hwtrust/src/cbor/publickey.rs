@@ -10,6 +10,7 @@ use openssl::ec::{EcGroup, EcKey};
 use openssl::ecdsa::EcdsaSig;
 use openssl::nid::Nid;
 use openssl::pkey::{Id, PKey, Public};
+use std::collections::HashSet;
 
 impl PublicKey {
     /// Create a public key from a [`CoseKey`].
@@ -116,7 +117,7 @@ fn pkey_from_okp_key(cose_key: &CoseKey) -> Result<PKey<Public>> {
         cose_key.alg == Some(Algorithm::Assigned(iana::Algorithm::EdDSA))
             || cose_key.alg == Some(Algorithm::Assigned(iana::Algorithm::ECDH_ES_HKDF_256))
     );
-    //ensure!(cose_key.alg == Some(Algorithm::Assigned(iana::Algorithm::EdDSA)));
+    ensure_no_disallowed_labels(cose_key)?;
     let crv = get_label_value(cose_key, Label::Int(iana::OkpKeyParameter::Crv.to_i64()))?;
     let x = get_label_value_as_bytes(cose_key, Label::Int(iana::OkpKeyParameter::X.to_i64()))?;
     let curve_id = if crv == &Value::from(iana::EllipticCurve::Ed25519.to_i64()) {
@@ -131,6 +132,7 @@ fn pkey_from_okp_key(cose_key: &CoseKey) -> Result<PKey<Public>> {
 
 fn pkey_from_ec2_key(cose_key: &CoseKey) -> Result<PKey<Public>> {
     ensure!(cose_key.kty == KeyType::Assigned(iana::KeyType::EC2));
+    ensure_no_disallowed_labels(cose_key)?;
     let crv = get_label_value(cose_key, Label::Int(iana::Ec2KeyParameter::Crv.to_i64()))?;
     let x = get_label_value_as_bytes(cose_key, Label::Int(iana::Ec2KeyParameter::X.to_i64()))?;
     let y = get_label_value_as_bytes(cose_key, Label::Int(iana::Ec2KeyParameter::Y.to_i64()))?;
@@ -155,6 +157,40 @@ fn pkey_from_ec_coords(nid: Nid, x: &[u8], y: &[u8]) -> Result<PKey<Public>> {
     let key = EcKey::from_public_key_affine_coordinates(&group, &x, &y)
         .context("Failed to create EC public key")?;
     PKey::from_ec_key(key).context("Failed to create PKey")
+}
+
+fn ensure_no_disallowed_labels(cose_key: &CoseKey) -> Result<()> {
+    let allow_list = match cose_key.kty {
+        KeyType::Assigned(iana::KeyType::EC2) => HashSet::from([
+            iana::Ec2KeyParameter::Crv.to_i64(),
+            iana::Ec2KeyParameter::X.to_i64(),
+            iana::Ec2KeyParameter::Y.to_i64(),
+        ]),
+        KeyType::Assigned(iana::KeyType::OKP) => {
+            HashSet::from([iana::OkpKeyParameter::Crv.to_i64(), iana::OkpKeyParameter::X.to_i64()])
+        }
+        _ => bail!("Invalid key type in COSE key"),
+    };
+
+    let params = cose_key.params.clone();
+    let disallowed: Vec<(Label, String)> = params
+        .into_iter()
+        .filter(|(label, _)| match label {
+            Label::Int(int) => !allow_list.contains(int),
+            Label::Text(_) => true,
+        })
+        .map(|(label, value)| -> (Label, String) {
+            let string = match value.as_bytes() {
+                Some(bytes) => hex::encode(bytes),
+                None => String::from("Expected Bytes, got {value:?}"),
+            };
+            (label, string)
+        })
+        .collect();
+
+    ensure!(disallowed.is_empty(), "disallowed labels should be empty: {:?}", disallowed);
+
+    Ok(())
 }
 
 /// Get the value corresponding to the provided label within the supplied CoseKey or error if it's
