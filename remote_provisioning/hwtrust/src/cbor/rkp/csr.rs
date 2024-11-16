@@ -11,6 +11,7 @@ use ciborium::value::Value;
 use openssl::pkey::Id;
 use openssl::stack::Stack;
 use openssl::x509::store::X509StoreBuilder;
+use openssl::x509::verify::X509VerifyFlags;
 use openssl::x509::{X509StoreContext, X509};
 
 const VERSION_OR_DEVICE_INFO_INDEX: usize = 0;
@@ -229,6 +230,10 @@ impl Csr {
 
         let mut root_store_builder = X509StoreBuilder::new()?;
         root_store_builder.add_cert(root)?;
+        // Setting this flag causes the signature on the root certificate to be checked.
+        // This ensures that the root certificate has not been corrupted.
+        root_store_builder.set_flags(X509VerifyFlags::CHECK_SS_SIGNATURE)?;
+
         let root_store = root_store_builder.build();
 
         let mut store = X509StoreContext::new()?;
@@ -379,6 +384,104 @@ mod tests {
     fn from_invalid_base64() {
         let err = Csr::from_base64_cbor(&Session::default(), &"not base64").unwrap_err();
         assert!(err.to_string().contains("invalid base64"));
+    }
+
+    const VALID_UDS_CHAIN: &[&str] = &[
+        "-----BEGIN CERTIFICATE-----\n\
+    MIICKjCCAbCgAwIBAgIUPFTOIhGtj7sELYJk5HicdV8r/x8wCgYIKoZIzj0EAwMw\n\
+    RzELMAkGA1UEBhMCVVMxCzAJBgNVBAgMAkNBMQ8wDQYDVQQKDAZHb29nbGUxGjAY\n\
+    BgNVBAMMEVRFU1QgSU5URVJNRURJQVRFMCAXDTI0MTExNDIwMTcwOFoYDzIxMjQx\n\
+    MDIxMjAxNzA4WjA/MQswCQYDVQQGEwJVUzELMAkGA1UECAwCQ0ExDzANBgNVBAoM\n\
+    Bkdvb2dsZTESMBAGA1UEAwwJVEVTVCBMRUFGMHYwEAYHKoZIzj0CAQYFK4EEACID\n\
+    YgAEry9HebgpyEnmimjtgs1KN5akdUx6cAEKVwkj0ZkYIW9V+YeRa4ap4yWvh8ZG\n\
+    U1GA0Eu26z7YQZbPuJ8LnyW0cXj3UGpXgP8EWyftWdz9EX6WpzdO7fuxtxeC/X2l\n\
+    ZuFIo2MwYTAdBgNVHQ4EFgQUWl8nH6cOAU3IrNZ2kqOzq3JUlukwHwYDVR0jBBgw\n\
+    FoAUjtSEVIqjzE6pGwlgEHPRn5o9a0YwDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8B\n\
+    Af8EBAMCB4AwCgYIKoZIzj0EAwMDaAAwZQIxAMmpFFiMRVnZHZSBCqjWQfA0lqaT\n\
+    HiusLqIEcAobDy80/mzO2yO6exNjoXkMB17COwIwD1YmiMkaqnnJkan9CNTnBXZB\n\
+    WNlU9CCE10ohcVfjssl7YVcnna70Rc1UH4DhjSj6\n\
+    -----END CERTIFICATE-----",
+        "-----BEGIN CERTIFICATE-----\n\
+    MIICLjCCAbOgAwIBAgIUKIsXCCFZRvz0BYboKmgZjyGArAEwCgYIKoZIzj0EAwMw\n\
+    PzELMAkGA1UEBhMCVVMxCzAJBgNVBAgMAkNBMQ8wDQYDVQQKDAZHb29nbGUxEjAQ\n\
+    BgNVBAMMCVRFU1QgUk9PVDAgFw0yNDExMTQyMDE1MzVaGA8yMTI0MTAyMTIwMTUz\n\
+    NVowRzELMAkGA1UEBhMCVVMxCzAJBgNVBAgMAkNBMQ8wDQYDVQQKDAZHb29nbGUx\n\
+    GjAYBgNVBAMMEVRFU1QgSU5URVJNRURJQVRFMHYwEAYHKoZIzj0CAQYFK4EEACID\n\
+    YgAEFYWPvG5PCQBBXFi/xY1F3MRqDXHkmqdTErc3wlBakVQmCjiklrEalZhMAr5Q\n\
+    0MYje5/l/ZbN+bvurD5ZsOyWRSrzTkzoUMQszB4fSoJtBp3grcEfd+/tQlC1DZO0\n\
+    wTROo2YwZDAdBgNVHQ4EFgQUjtSEVIqjzE6pGwlgEHPRn5o9a0YwHwYDVR0jBBgw\n\
+    FoAUwQ91rFNLmFq9YMlG1bqk7OvWk44wEgYDVR0TAQH/BAgwBgEB/wIBADAOBgNV\n\
+    HQ8BAf8EBAMCAgQwCgYIKoZIzj0EAwMDaQAwZgIxAMWXmsh6d8YSkP1+wR9eMDCe\n\
+    9G0EFAPOn+BiKfthnnboRUEr8BuIt3w9SkEDCdWfcAIxAMJ99xkGf3bcdykao4jh\n\
+    bgG844IvDSx11EwzQV/kcteHOut93YO0D83CgkDc2C4dNA==\n\
+    -----END CERTIFICATE-----",
+        "-----BEGIN CERTIFICATE-----\n\
+    MIICJTCCAaugAwIBAgIUUo4NdEcdRuQdrm5Trm5x+qvx2LEwCgYIKoZIzj0EAwMw\n\
+    PzELMAkGA1UEBhMCVVMxCzAJBgNVBAgMAkNBMQ8wDQYDVQQKDAZHb29nbGUxEjAQ\n\
+    BgNVBAMMCVRFU1QgUk9PVDAgFw0yNDExMTQyMDEzNDRaGA8yMTI0MTAyMTIwMTM0\n\
+    NFowPzELMAkGA1UEBhMCVVMxCzAJBgNVBAgMAkNBMQ8wDQYDVQQKDAZHb29nbGUx\n\
+    EjAQBgNVBAMMCVRFU1QgUk9PVDB2MBAGByqGSM49AgEGBSuBBAAiA2IABOGIoNBS\n\
+    sVs+mTjZpqOyoWTEOIvIIhuFfi49eqleyKTnekgXyXcJfqppsbqYcgPKaTbJmhU/\n\
+    iuOjaSIUlyf5tjJ7bIOAngopcH6u+Qky/a2Q///eOIl7U9WhEMnSYwZ7rqNmMGQw\n\
+    HQYDVR0OBBYEFMEPdaxTS5havWDJRtW6pOzr1pOOMB8GA1UdIwQYMBaAFMEPdaxT\n\
+    S5havWDJRtW6pOzr1pOOMA4GA1UdDwEB/wQEAwICBDASBgNVHRMBAf8ECDAGAQH/\n\
+    AgEBMAoGCCqGSM49BAMDA2gAMGUCMDa2TefBEmKLebf6KziawLXeQRhqb4wcMgtE\n\
+    RUZ7JOojBC6CqN7xqPMIo2Pp9Pn6iwIxANlSkus723tk6OdeG33A++HwZ9KIXzU4\n\
+    cJUsEeE4pQ5exYACy2Nd+LVtmerw8ZF6xg==\n\
+    -----END CERTIFICATE-----",
+    ];
+
+    const INVALID_UDS_ROOT: &str = "-----BEGIN CERTIFICATE-----\n\
+    MIICJTCCAaugAwIBAgIUUo4NdEcdRuQdrm5Trm5x+qvx2LEwCgYIKoZIzj0EAwMw\n\
+    PzELMAkGA1UEBhMCVVMxCzAJBgNVBAgMAkNBMQ8wDQYDVQQKDAZHb29nbGUxEjAQ\n\
+    BgNVBAMMCVRFU1QgUk9PVDAgFw0yNDExMTQyMDEzNDRaGA8yMTI0MTAyMTIwMTM0\n\
+    NFowPzELMAkGA1UEBhMCVVMxCzAJBgNVBAgMAkNBMQ8wDQYDVQQKDAZHb29nbGUx\n\
+    EjAQBgNVBAMMCVRFU1QgUk9PVDB2MBAGByqGSM49AgEGBSuBBAAiA2IABOGIoNBS\n\
+    sVs+mTjZpqOyoWTEOIvIIhuFfi49eqleyKTnekgXyXcJfqppsbqYcgPKaTbJmhU/\n\
+    iuOjaSIUlyf5tjJ7bIOAngopcH6u+Qky/a2Q///eOIl7U9WhEMnSYwZ7rqNmMGQw\n\
+    HQYDVR0OBBYEFMEPdaxTS5havWDJRtW6pOzr1pOOMB8GA1UdIwQYMBaAFMEPdaxT\n\
+    S5havWDJRtW6pOzr1pOOMA4GA1UdDwEB/wQEAwICBDASBgNVHRMBAf8ECDAGAQH/\n\
+    AgEBMAoGCCqGSM49BAMDA2gAMGUCMDa2TefBEmKLebf6KziawLXeQRhqb4wcMgtE\n\
+    RUZ7JOojBC6CqN7xqPMIo2Pp9Pn6iwIxANlSkus723tk6OdeG33A++HwZ9KIXzU4\n\
+    cJUsEeE4pQ5exYACy2Ndthisisaproblem==\n\
+    -----END CERTIFICATE-----";
+
+    #[test]
+    fn verify_a_valid_cert_chain() {
+        let leaf = X509::from_pem(VALID_UDS_CHAIN[0].as_bytes()).unwrap();
+        let intermediate = X509::from_pem(VALID_UDS_CHAIN[1].as_bytes()).unwrap();
+        let root = X509::from_pem(VALID_UDS_CHAIN[2].as_bytes()).unwrap();
+        let certs = vec![root, intermediate, leaf];
+        let signer = "Test Signer".to_string();
+        let result = Csr::validate_uds_cert_path(&signer, &certs);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn make_sure_root_signature_is_checked() {
+        let leaf = X509::from_pem(VALID_UDS_CHAIN[0].as_bytes()).unwrap();
+        let intermediate = X509::from_pem(VALID_UDS_CHAIN[1].as_bytes()).unwrap();
+        let valid_root = X509::from_pem(VALID_UDS_CHAIN[2].as_bytes()).unwrap();
+        let invalid_root = X509::from_pem(INVALID_UDS_ROOT.as_bytes()).unwrap();
+
+        let valid_root_public_key = valid_root.public_key().unwrap();
+        let invalid_root_public_key = invalid_root.public_key().unwrap();
+        assert!(invalid_root_public_key.public_eq(&valid_root_public_key));
+
+        let certs = vec![invalid_root.clone(), intermediate.clone(), leaf.clone()];
+        let signer = "Test Signer".to_string();
+        let error = Csr::validate_uds_cert_path(&signer, &certs).unwrap_err();
+        assert!(error.to_string().contains("certificate signature failure"));
+
+        let mut intermediates = Stack::new().unwrap();
+        intermediates.push(intermediate).unwrap();
+
+        let mut builder = X509StoreBuilder::new().unwrap();
+        builder.add_cert(invalid_root).unwrap();
+        let store = builder.build();
+
+        let mut context = X509StoreContext::new().unwrap();
+        assert!(context.init(&store, &leaf, &intermediates, |c| c.verify_cert()).unwrap());
     }
 }
 
