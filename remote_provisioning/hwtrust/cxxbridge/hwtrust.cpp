@@ -19,11 +19,33 @@ rust::DiceChainKind convertKind(DiceChain::Kind kind) {
   }
 }
 
-struct BoxedDiceChain {
-    ::rust::Box<rust::DiceChain> chain;
+// The public API hides all rust deps from clients, so we end up with opaque, boxed types. This
+// class standardizes the syntax for dealing with these types. How to...
+// ...define a boxed opaque type:     struct BoxedFoo : Boxed<Foo, BoxedFoo> {};
+// ...construct an object:            auto foo = BoxedFoo::moveFrom(boxed);
+// ...dereference the inner object:   **foo;
+template <typename BoxedT, typename DerivedT>
+class Boxed {
+public:
+  Boxed(::rust::Box<BoxedT> b) : box_(std::move(b)) {}
+
+  static std::unique_ptr<DerivedT> moveFrom(::rust::Box<BoxedT>& b) {
+    return std::make_unique<DerivedT>(std::move(b));
+  }
+
+  const BoxedT &operator*() const noexcept { return *box_; }
+  BoxedT &operator*() noexcept { return *box_; }
+
+private:
+  ::rust::Box<BoxedT> box_;
 };
 
-// Define with a full definition of BoxedDiceChain to satisfy unique_ptr.
+// Definition of the forward-declared boxed types.
+struct BoxedDiceChain : Boxed<rust::DiceChain, BoxedDiceChain> {};
+struct BoxedCsr : Boxed<rust::Csr, BoxedCsr> {};
+
+
+// Define to satisfy unique_ptr.
 DiceChain::~DiceChain() {}
 
 DiceChain::DiceChain(std::unique_ptr<BoxedDiceChain> chain, size_t size) noexcept
@@ -38,15 +60,13 @@ Result<DiceChain> DiceChain::Verify(
   if (!res.error.empty()) {
       return Error() << static_cast<std::string>(res.error);
   }
-  BoxedDiceChain boxedChain = { std::move(res.chain) };
-  auto diceChain = std::make_unique<BoxedDiceChain>(std::move(boxedChain));
-  return DiceChain(std::move(diceChain), res.len);
+  return DiceChain(BoxedDiceChain::moveFrom(res.chain), res.len);
 }
 
 Result<std::vector<std::vector<uint8_t>>> DiceChain::CosePublicKeys() const noexcept {
   std::vector<std::vector<uint8_t>> result;
   for (auto i = 0; i < size_; ++i) {
-    auto key = rust::GetDiceChainPublicKey(*chain_->chain, i);
+    auto key = rust::GetDiceChainPublicKey(**chain_, i);
     if (key.empty()) {
       return Error() << "Failed to get public key from chain entry " << i;
     }
@@ -56,12 +76,8 @@ Result<std::vector<std::vector<uint8_t>>> DiceChain::CosePublicKeys() const noex
 }
 
 bool DiceChain::IsProper() const noexcept {
-  return rust::IsDiceChainProper(*chain_->chain);
+  return rust::IsDiceChainProper(**chain_);
 }
-
-struct BoxedCsr {
-    ::rust::Box<rust::Csr> csr;
-};
 
 // Define with a full definition of BoxedCsr to satisfy unique_ptr.
 Csr::~Csr() {}
@@ -77,19 +93,15 @@ Result<Csr> Csr::validate(const std::vector<uint8_t>& request, DiceChain::Kind k
     if (!result.error.empty()) {
         return Error() << static_cast<std::string>(result.error);
     }
-    BoxedCsr boxedCsr = { std::move(result.csr) };
-    auto csr = std::make_unique<BoxedCsr>(std::move(boxedCsr));
-    return Csr(std::move(csr), kind, instance);
+    return Csr(BoxedCsr::moveFrom(result.csr), kind, instance);
 }
 
 Result<DiceChain> Csr::getDiceChain() const noexcept {
-    auto result = rust::getDiceChainFromCsr(*mCsr->csr);
+    auto result = rust::getDiceChainFromCsr(**mCsr);
     if (!result.error.empty()) {
         return Error() << static_cast<std::string>(result.error);
     }
-    BoxedDiceChain boxedChain = { std::move(result.chain) };
-    auto diceChain = std::make_unique<BoxedDiceChain>(std::move(boxedChain));
-    return DiceChain(std::move(diceChain), result.len);
+  return DiceChain(BoxedDiceChain::moveFrom(result.chain), result.len);
 }
 
 } // namespace hwtrust

@@ -28,7 +28,10 @@ impl PublicKey {
         ensure!(sign1.protected.header.crit.is_empty(), "No critical headers allowed");
         ensure!(
             sign1.protected.header.alg == Some(Algorithm::Assigned(iana_algorithm(self.kind()))),
-            "Algorithm mistmatch in protected header"
+            "Algorithm mistmatch in protected header. \
+             Signature - protected.header.alg: {:?}, Key - kind: {:?}",
+            sign1.protected.header.alg,
+            iana_algorithm(self.kind())
         );
         sign1.verify_signature(aad, |signature, message| match self.kind() {
             SignatureKind::Ec(_) => {
