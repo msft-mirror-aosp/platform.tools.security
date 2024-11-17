@@ -129,12 +129,12 @@ mod tests {
     fn from_json_valid_v3_ed25519() {
         let json = fs::read_to_string("testdata/factory_csr/v3_ed25519_valid.json").unwrap();
         let csr = FactoryCsr::from_json(&Session::default(), &json).unwrap();
-        if let Csr::V3 { device_info, dice_chain, uds_certs } = csr.csr {
-            assert_eq!(device_info, test_device_info(DeviceInfoVersion::V3));
+        if let Csr::V3 { dice_chain, uds_certs, csr_payload, .. } = csr.csr {
+            assert_eq!(csr_payload.device_info, test_device_info(DeviceInfoVersion::V3));
             let root_public_key = parse_pem_public_key_or_panic(
                 "-----BEGIN PUBLIC KEY-----\n\
-                MCowBQYDK2VwAyEA3FEn/nhqoGOKNok1AJaLfTKI+aFXHf4TfC42vUyPU6s=\n\
-                -----END PUBLIC KEY-----\n",
+                    MCowBQYDK2VwAyEArqr7jIIQ8TB1+l/Sh69eiSJL6t6txO1oLhpkdVSUuBk=\n\
+                    -----END PUBLIC KEY-----\n",
             );
             match dice_chain {
                 ChainForm::Proper(p) => {
@@ -180,13 +180,13 @@ mod tests {
     fn from_json_valid_v3_p256() {
         let json = fs::read_to_string("testdata/factory_csr/v3_p256_valid.json").unwrap();
         let csr = FactoryCsr::from_json(&Session::default(), &json).unwrap();
-        if let Csr::V3 { device_info, dice_chain, uds_certs } = csr.csr {
-            assert_eq!(device_info, test_device_info(DeviceInfoVersion::V3));
+        if let Csr::V3 { dice_chain, uds_certs, csr_payload, .. } = csr.csr {
+            assert_eq!(csr_payload.device_info, test_device_info(DeviceInfoVersion::V3));
             let root_public_key = parse_pem_public_key_or_panic(
                 "-----BEGIN PUBLIC KEY-----\n\
-                MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEqT6ujVegwBbVWtsZeZmvN4WO3THx\n\
-                zpPPnt2rAOdqL9DSDZcIBbLas5xh9psaEaD0o/0KxlUVZplO/BPmRf3Ycg==\n\
-                -----END PUBLIC KEY-----\n",
+                    MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEh5NUV4872vKEL3XPSp8lfkV4AN3J\n\
+                KJti1Y5kbbR9ucTpSyoOjX9UmBCM/uuPU/MGXMWrgbBf3++02ALzC+V3eQ==\n\
+                    -----END PUBLIC KEY-----\n",
             );
             match dice_chain {
                 ChainForm::Proper(p) => {
@@ -223,27 +223,27 @@ mod tests {
                 get_pem_or_die(chain.first()),
                 "-----BEGIN CERTIFICATE-----\n\
                 MIIBaDCCARqgAwIBAgIBezAFBgMrZXAwKzEVMBMGA1UEChMMRmFrZSBDb21wYW55\n\
-                MRIwEAYDVQQDEwlGYWtlIFJvb3QwHhcNMjQxMDI5MTcyMzUzWhcNNDkxMDIzMTcy\n\
-                MzUzWjArMRUwEwYDVQQKEwxGYWtlIENvbXBhbnkxEjAQBgNVBAMTCUZha2UgUm9v\n\
-                dDAqMAUGAytlcAMhAP8RO2gUf4KpszSCofM+eS9mZ5vsy5Nv1Nb1rOWeixbko2Mw\n\
-                YTAdBgNVHQ4EFgQUDAq0XZYLX/NPsnJb0sSoF7rSYG4wHwYDVR0jBBgwFoAUDAq0\n\
-                XZYLX/NPsnJb0sSoF7rSYG4wDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8BAf8EBAMC\n\
-                AgQwBQYDK2VwA0EAfTXtKTy8RCPxD0CaPpcHkzWkjwXvUmDILBKUJaDPE/lUxr8I\n\
-                TEr9On/8C+eY7fy4SAdtc7EtLECTlNRUSc4ECQ==\n\
+                MRIwEAYDVQQDEwlGYWtlIFJvb3QwHhcNMjQxMTA3MTMwOTMxWhcNNDkxMTAxMTMw\n\
+                OTMxWjArMRUwEwYDVQQKEwxGYWtlIENvbXBhbnkxEjAQBgNVBAMTCUZha2UgUm9v\n\
+                dDAqMAUGAytlcAMhAOgFrCrwxUYuOBSIk31/ykUsDP1vSRCzs8x2e8u8vumIo2Mw\n\
+                YTAdBgNVHQ4EFgQUtLO8kYH4qiyhGNKhkzZvxk7td94wHwYDVR0jBBgwFoAUtLO8\n\
+                kYH4qiyhGNKhkzZvxk7td94wDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8BAf8EBAMC\n\
+                AgQwBQYDK2VwA0EA1o8kJ3NTsY7B5/rRkJi8i/RZE1/0pQC2OUTOi8S7ZCkVdBJK\n\
+                7RyHo5/rVPXwVcsd3ZU1jZQalooek4mbDAWxAw==\n\
                 -----END CERTIFICATE-----\n"
             );
             assert_eq!(
                 get_pem_or_die(chain.get(1)),
                 "-----BEGIN CERTIFICATE-----\n\
                 MIIBmzCCAU2gAwIBAgICAcgwBQYDK2VwMCsxFTATBgNVBAoTDEZha2UgQ29tcGFu\n\
-                eTESMBAGA1UEAxMJRmFrZSBSb290MB4XDTI0MTAyOTE3MjM1M1oXDTQ5MTAyMzE3\n\
-                MjM1M1owLjEVMBMGA1UEChMMRmFrZSBDb21wYW55MRUwEwYDVQQDEwxGYWtlIENo\n\
-                aXBzZXQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQRE36cvLi83QAMZciuRW9J\n\
-                NEh8ZRFHWplE0u4i1riTdBFaclau67j+b4R4J4d23+xxG85tjtxvb8Ll8jOO1RNq\n\
-                o2MwYTAdBgNVHQ4EFgQUUToqIkrD77ArjRBU8Hk4nwsotoEwHwYDVR0jBBgwFoAU\n\
-                DAq0XZYLX/NPsnJb0sSoF7rSYG4wDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8BAf8E\n\
-                BAMCAgQwBQYDK2VwA0EA3g/zaq6Ld2Y+Hs+/6RA3Kmm9DgJQtJhbKILX75ujfCCo\n\
-                gl+QTFTWz05O8vjNHVVNtryHbJ0UAeL5aazoBC3gCA==\n\
+                eTESMBAGA1UEAxMJRmFrZSBSb290MB4XDTI0MTEwNzEzMDkzMVoXDTQ5MTEwMTEz\n\
+                MDkzMVowLjEVMBMGA1UEChMMRmFrZSBDb21wYW55MRUwEwYDVQQDEwxGYWtlIENo\n\
+                aXBzZXQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAATmCOHpHOZzSZvp1frFACgm\n\
+                Itnj33YAKYseZfT68AlrN4UtC5boNVU5wjKWQFRcOlup5kxX2UVlb+jFCO7eskFU\n\
+                o2MwYTAdBgNVHQ4EFgQU7KrNWsfWHijorD/+b5TBIZCzj3MwHwYDVR0jBBgwFoAU\n\
+                tLO8kYH4qiyhGNKhkzZvxk7td94wDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8BAf8E\n\
+                BAMCAgQwBQYDK2VwA0EAuDdXCHTYt92UxftrDJnKXxjtDBCYMqXSlIuYw8p1W/UP\n\
+                Ccerp/jUng8ELnfPj2ZTkTP2+NhvwsYKvbaxaz9pDA==\n\
                 -----END CERTIFICATE-----\n"
             );
         } else {
@@ -322,5 +322,18 @@ mod tests {
         session.set_allow_any_mode(true);
         let csr = FactoryCsr::from_json(&session, &json).unwrap();
         assert_eq!(csr.name, "avf");
+    }
+
+    #[test]
+    fn from_json_v3_p256_with_private_key() {
+        let json =
+            fs::read_to_string("testdata/factory_csr/v3_p256_with_private_key.json").unwrap();
+        let err = FactoryCsr::from_json(&Session::default(), &json).unwrap_err();
+        let source = err.source().unwrap().to_string();
+        assert!(
+            source.contains("disallowed labels should be empty")
+                && source
+                    .contains("12953f77f0726491a09c5b2d134a26a8a657dbc170c4036ffde81e881e0acd03")
+        );
     }
 }
