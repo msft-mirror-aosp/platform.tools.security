@@ -1,7 +1,7 @@
 # Code owners for various security-related things on Android.
 
 # Sanitizers
-mitchp@google.com
+pcc@google.com
 eugenis@google.com
 fmayer@google.com
 
