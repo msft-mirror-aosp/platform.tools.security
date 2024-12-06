@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use hwtrust::dice;
 use hwtrust::dice::ChainForm;
 use hwtrust::rkp;
-use hwtrust::session::{Options, Session};
+use hwtrust::session::{Options, RkpInstance, Session};
 use std::io::BufRead;
 use std::{fs, io};
 
@@ -50,6 +50,10 @@ struct DiceChainArgs {
     /// Allow non-normal DICE chain modes.
     #[clap(long)]
     allow_any_mode: bool,
+    /// Validate the chain against the requirements of a specific RKP instance.
+    /// If not specified, the default RKP instance is used.
+    #[clap(value_enum, long, default_value = "default")]
+    rkp_instance: RkpInstance,
 }
 
 #[derive(Parser)]
@@ -77,6 +81,10 @@ struct CsrArgs {
     /// Allow non-normal DICE chain modes.
     #[clap(long)]
     allow_any_mode: bool,
+    /// Validate the chain against the requirements of a specific RKP instance.
+    /// If not specified, the default RKP instance is used.
+    #[clap(value_enum, long, default_value = "default")]
+    rkp_instance: RkpInstance,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
@@ -136,6 +144,7 @@ fn main() -> Result<()> {
 fn verify_dice_chain(args: &Args, sub_args: &DiceChainArgs) -> Result<Option<String>> {
     let mut session = session_from_vsr(args.vsr);
     session.set_allow_any_mode(sub_args.allow_any_mode);
+    session.set_rkp_instance(sub_args.rkp_instance);
     let chain = dice::ChainForm::from_cbor(&session, &fs::read(&sub_args.chain)?)?;
     if args.verbose {
         println!("{chain:#?}");
@@ -175,6 +184,7 @@ fn parse_factory_csr(args: &Args, sub_args: &FactoryCsrArgs) -> Result<Option<St
 fn parse_csr(args: &Args, sub_args: &CsrArgs) -> Result<Option<String>> {
     let mut session = session_from_vsr(args.vsr);
     session.set_allow_any_mode(sub_args.allow_any_mode);
+    session.set_rkp_instance(sub_args.rkp_instance);
     let input = &fs::File::open(&sub_args.csr_file)?;
     let csr = rkp::Csr::from_cbor(&session, input)?;
     if args.verbose {

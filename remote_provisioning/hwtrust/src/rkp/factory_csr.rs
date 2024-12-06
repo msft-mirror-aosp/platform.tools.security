@@ -1,7 +1,8 @@
 use crate::rkp::Csr;
-use crate::session::Session;
+use crate::session::{RkpInstance, Session};
 use anyhow::{bail, Result};
 use serde_json::{Map, Value};
+use std::str::FromStr;
 
 /// Represents a "Factory CSR", which is a JSON value captured for each device on the factory
 /// line. This JSON is uploaded to the RKP backend to register the device. We reuse the CSR
@@ -38,7 +39,9 @@ impl FactoryCsr {
     fn from_map(session: &Session, fields: Map<String, Value>) -> Result<Self> {
         let base64 = get_string_from_map(&fields, "csr")?;
         let name = get_string_from_map(&fields, "name")?;
-        let csr = Csr::from_base64_cbor(session, &base64)?;
+        let mut new_session = session.clone();
+        new_session.set_rkp_instance(RkpInstance::from_str(&name)?);
+        let csr = Csr::from_base64_cbor(&new_session, &base64)?;
         Ok(Self { csr, name })
     }
 }
@@ -126,15 +129,21 @@ mod tests {
     fn from_json_valid_v3_ed25519() {
         let json = fs::read_to_string("testdata/factory_csr/v3_ed25519_valid.json").unwrap();
         let csr = FactoryCsr::from_json(&Session::default(), &json).unwrap();
-        if let Csr::V3 { device_info, dice_chain } = csr.csr {
-            assert_eq!(device_info, test_device_info(DeviceInfoVersion::V3));
+        if let Csr::V3 { dice_chain, uds_certs, csr_payload, .. } = csr.csr {
+            assert_eq!(csr_payload.device_info, test_device_info(DeviceInfoVersion::V3));
             let root_public_key = parse_pem_public_key_or_panic(
                 "-----BEGIN PUBLIC KEY-----\n\
-                MCowBQYDK2VwAyEA3FEn/nhqoGOKNok1AJaLfTKI+aFXHf4TfC42vUyPU6s=\n\
-                -----END PUBLIC KEY-----\n",
+                    MCowBQYDK2VwAyEArqr7jIIQ8TB1+l/Sh69eiSJL6t6txO1oLhpkdVSUuBk=\n\
+                    -----END PUBLIC KEY-----\n",
             );
-            assert_eq!(dice_chain.root_public_key(), &root_public_key);
-            assert_eq!(dice_chain.payloads().len(), 1);
+            match dice_chain {
+                ChainForm::Proper(p) => {
+                    assert_eq!(p.root_public_key(), &root_public_key);
+                    assert_eq!(p.payloads().len(), 1);
+                }
+                ChainForm::Degenerate(d) => panic!("Parsed chain is not proper: {:?}", d),
+            }
+            assert_eq!(uds_certs.len(), 0);
         } else {
             panic!("Parsed CSR was not V3: {:?}", csr);
         }
@@ -171,19 +180,97 @@ mod tests {
     fn from_json_valid_v3_p256() {
         let json = fs::read_to_string("testdata/factory_csr/v3_p256_valid.json").unwrap();
         let csr = FactoryCsr::from_json(&Session::default(), &json).unwrap();
-        if let Csr::V3 { device_info, dice_chain } = csr.csr {
-            assert_eq!(device_info, test_device_info(DeviceInfoVersion::V3));
+        if let Csr::V3 { dice_chain, uds_certs, csr_payload, .. } = csr.csr {
+            assert_eq!(csr_payload.device_info, test_device_info(DeviceInfoVersion::V3));
             let root_public_key = parse_pem_public_key_or_panic(
                 "-----BEGIN PUBLIC KEY-----\n\
-                MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEqT6ujVegwBbVWtsZeZmvN4WO3THx\n\
-                zpPPnt2rAOdqL9DSDZcIBbLas5xh9psaEaD0o/0KxlUVZplO/BPmRf3Ycg==\n\
-                -----END PUBLIC KEY-----\n",
+                    MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEh5NUV4872vKEL3XPSp8lfkV4AN3J\n\
+                KJti1Y5kbbR9ucTpSyoOjX9UmBCM/uuPU/MGXMWrgbBf3++02ALzC+V3eQ==\n\
+                    -----END PUBLIC KEY-----\n",
             );
-            assert_eq!(dice_chain.root_public_key(), &root_public_key);
-            assert_eq!(dice_chain.payloads().len(), 1);
+            match dice_chain {
+                ChainForm::Proper(p) => {
+                    assert_eq!(p.root_public_key(), &root_public_key);
+                    assert_eq!(p.payloads().len(), 1);
+                }
+                ChainForm::Degenerate(d) => panic!("Parsed chain is not proper: {:?}", d),
+            }
+            assert_eq!(uds_certs.len(), 0);
         } else {
             panic!("Parsed CSR was not V3: {:?}", csr);
         }
+    }
+
+    fn get_pem_or_die(cert: Option<&X509>) -> String {
+        let cert = cert.unwrap_or_else(|| panic!("Missing x.509 cert"));
+        let pem =
+            cert.to_pem().unwrap_or_else(|e| panic!("Failed to encode X.509 cert to PEM: {e}"));
+        String::from_utf8_lossy(&pem).to_string()
+    }
+
+    #[test]
+    fn from_json_valid_v3_p256_with_uds_certs() {
+        let json =
+            fs::read_to_string("testdata/factory_csr/v3_p256_valid_with_uds_certs.json").unwrap();
+        let csr = FactoryCsr::from_json(&Session::default(), &json).unwrap();
+        if let Csr::V3 { uds_certs, .. } = csr.csr {
+            assert_eq!(uds_certs.len(), 1);
+            let chain = uds_certs.get("test-signer-name").unwrap_or_else(|| {
+                panic!("Unable to find 'test-signer-name' in UdsCerts: {uds_certs:?}")
+            });
+            assert_eq!(chain.len(), 2);
+            assert_eq!(
+                get_pem_or_die(chain.first()),
+                "-----BEGIN CERTIFICATE-----\n\
+                MIIBaDCCARqgAwIBAgIBezAFBgMrZXAwKzEVMBMGA1UEChMMRmFrZSBDb21wYW55\n\
+                MRIwEAYDVQQDEwlGYWtlIFJvb3QwHhcNMjQxMTA3MTMwOTMxWhcNNDkxMTAxMTMw\n\
+                OTMxWjArMRUwEwYDVQQKEwxGYWtlIENvbXBhbnkxEjAQBgNVBAMTCUZha2UgUm9v\n\
+                dDAqMAUGAytlcAMhAOgFrCrwxUYuOBSIk31/ykUsDP1vSRCzs8x2e8u8vumIo2Mw\n\
+                YTAdBgNVHQ4EFgQUtLO8kYH4qiyhGNKhkzZvxk7td94wHwYDVR0jBBgwFoAUtLO8\n\
+                kYH4qiyhGNKhkzZvxk7td94wDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8BAf8EBAMC\n\
+                AgQwBQYDK2VwA0EA1o8kJ3NTsY7B5/rRkJi8i/RZE1/0pQC2OUTOi8S7ZCkVdBJK\n\
+                7RyHo5/rVPXwVcsd3ZU1jZQalooek4mbDAWxAw==\n\
+                -----END CERTIFICATE-----\n"
+            );
+            assert_eq!(
+                get_pem_or_die(chain.get(1)),
+                "-----BEGIN CERTIFICATE-----\n\
+                MIIBmzCCAU2gAwIBAgICAcgwBQYDK2VwMCsxFTATBgNVBAoTDEZha2UgQ29tcGFu\n\
+                eTESMBAGA1UEAxMJRmFrZSBSb290MB4XDTI0MTEwNzEzMDkzMVoXDTQ5MTEwMTEz\n\
+                MDkzMVowLjEVMBMGA1UEChMMRmFrZSBDb21wYW55MRUwEwYDVQQDEwxGYWtlIENo\n\
+                aXBzZXQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAATmCOHpHOZzSZvp1frFACgm\n\
+                Itnj33YAKYseZfT68AlrN4UtC5boNVU5wjKWQFRcOlup5kxX2UVlb+jFCO7eskFU\n\
+                o2MwYTAdBgNVHQ4EFgQU7KrNWsfWHijorD/+b5TBIZCzj3MwHwYDVR0jBBgwFoAU\n\
+                tLO8kYH4qiyhGNKhkzZvxk7td94wDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8BAf8E\n\
+                BAMCAgQwBQYDK2VwA0EAuDdXCHTYt92UxftrDJnKXxjtDBCYMqXSlIuYw8p1W/UP\n\
+                Ccerp/jUng8ELnfPj2ZTkTP2+NhvwsYKvbaxaz9pDA==\n\
+                -----END CERTIFICATE-----\n"
+            );
+        } else {
+            panic!("Parsed CSR was not V3: {:?}", csr);
+        }
+    }
+
+    #[test]
+    fn from_json_v3_p256_with_mismatch_uds_certs() {
+        let json =
+            fs::read_to_string("testdata/factory_csr/v3_p256_mismatched_uds_certs.json").unwrap();
+        let err = FactoryCsr::from_json(&Session::default(), &json).unwrap_err();
+        assert!(
+            err.to_string().contains("does not match the DICE chain root"),
+            "Expected mismatch between UDS_pub and UdsCerts leaf"
+        );
+    }
+
+    #[test]
+    fn from_json_v3_p256_with_extra_uds_cert_in_chain() {
+        let json = fs::read_to_string("testdata/factory_csr/v3_p256_extra_uds_cert_in_chain.json")
+            .unwrap();
+        let err = FactoryCsr::from_json(&Session::default(), &json).unwrap_err();
+        assert!(
+            err.to_string().contains("Verified chain doesn't match input"),
+            "Expected cert validation to fail due to extra cert in UDS chain"
+        );
     }
 
     #[test]
@@ -225,5 +312,28 @@ mod tests {
         let json = serde_json::to_string(&value).unwrap();
         let csr = FactoryCsr::from_json(&Session::default(), &json).unwrap();
         assert_eq!(csr.name, "default");
+    }
+
+    #[test]
+    fn from_json_valid_v3_avf_with_rkpvm_markers() {
+        let json = fs::read_to_string("testdata/factory_csr/v3_avf_valid_with_rkpvm_markers.json")
+            .unwrap();
+        let mut session = Session::default();
+        session.set_allow_any_mode(true);
+        let csr = FactoryCsr::from_json(&session, &json).unwrap();
+        assert_eq!(csr.name, "avf");
+    }
+
+    #[test]
+    fn from_json_v3_p256_with_private_key() {
+        let json =
+            fs::read_to_string("testdata/factory_csr/v3_p256_with_private_key.json").unwrap();
+        let err = FactoryCsr::from_json(&Session::default(), &json).unwrap_err();
+        let source = err.source().unwrap().to_string();
+        assert!(
+            source.contains("disallowed labels should be empty")
+                && source
+                    .contains("12953f77f0726491a09c5b2d134a26a8a657dbc170c4036ffde81e881e0acd03")
+        );
     }
 }
