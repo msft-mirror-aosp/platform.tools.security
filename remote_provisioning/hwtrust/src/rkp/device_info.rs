@@ -36,14 +36,13 @@ pub struct DeviceInfo {
     /// Patch level of the vendor partition.
     pub vendor_patch_level: u32,
     /// If backed by KeyMint, this is the security level of the HAL.
-    pub security_level: Option<DeviceInfoSecurityLevel>,
-    /// Whether or not secure boot is enforced/required by the SoC.
-    pub fused: bool,
+    pub security_level: DeviceInfoSecurityLevel,
+    /// Whether secure boot is enforced/required by the SoC.
+    pub fused: u32,
 }
 
 impl fmt::Debug for DeviceInfo {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        let security_level: &dyn fmt::Debug = self.security_level.as_ref().map_or(&"<none>", |s| s);
         let os_version: &dyn fmt::Debug = self.os_version.as_ref().map_or(&"<none>", |v| v);
 
         fmt.debug_struct("DeviceInfo")
@@ -60,7 +59,7 @@ impl fmt::Debug for DeviceInfo {
             .field("system_patch_level", &self.system_patch_level)
             .field("boot_patch_level", &self.boot_patch_level)
             .field("vendor_patch_level", &self.vendor_patch_level)
-            .field("security_level", security_level)
+            .field("security_level", &self.security_level)
             .field("fused", &self.fused)
             .finish()
     }
@@ -75,6 +74,8 @@ pub enum DeviceInfoBootloaderState {
     Unlocked,
     /// This field is a placeholder for the AVF backend.
     Avf,
+    /// This field is a placeholder for a Factory CSR
+    Factory,
 }
 
 impl TryFrom<&str> for DeviceInfoBootloaderState {
@@ -85,7 +86,7 @@ impl TryFrom<&str> for DeviceInfoBootloaderState {
             "locked" => Ok(Self::Locked),
             "unlocked" => Ok(Self::Unlocked),
             "avf" => Ok(Self::Avf),
-            _ => Err(anyhow!("Invalid bootloader state: `{s}`")),
+            _ => Ok(Self::Factory),
         }
     }
 }
@@ -101,6 +102,8 @@ pub enum DeviceInfoVbState {
     Orange,
     /// This field is a placeholder for the AVF backend.
     Avf,
+    /// This field is a placeholder for a Factory CSR
+    Factory,
 }
 
 impl TryFrom<&str> for DeviceInfoVbState {
@@ -112,7 +115,7 @@ impl TryFrom<&str> for DeviceInfoVbState {
             "yellow" => Ok(Self::Yellow),
             "orange" => Ok(Self::Orange),
             "avf" => Ok(Self::Avf),
-            _ => Err(anyhow!("Invalid VB state: `{s}`")),
+            _ => Ok(Self::Factory),
         }
     }
 }
@@ -147,6 +150,8 @@ pub enum DeviceInfoSecurityLevel {
     StrongBox,
     /// AVF's backend.
     Avf,
+    /// This field is a placeholder for a Factory CSR
+    Factory,
 }
 
 impl TryFrom<&str> for DeviceInfoSecurityLevel {
@@ -157,7 +162,7 @@ impl TryFrom<&str> for DeviceInfoSecurityLevel {
             "strongbox" => Ok(Self::StrongBox),
             "tee" => Ok(Self::Tee),
             "avf" => Ok(Self::Avf),
-            _ => Err(anyhow!("Invalid security level: `{s}`")),
+            _ => Ok(Self::Factory),
         }
     }
 }
@@ -176,7 +181,10 @@ mod tests {
             DeviceInfoBootloaderState::try_from("UNLocked").unwrap(),
             DeviceInfoBootloaderState::Unlocked
         );
-        DeviceInfoBootloaderState::try_from("nope").unwrap_err();
+        assert_eq!(
+            DeviceInfoBootloaderState::try_from("nope").unwrap(),
+            DeviceInfoBootloaderState::Factory
+        );
     }
 
     #[test]
@@ -184,7 +192,7 @@ mod tests {
         assert_eq!(DeviceInfoVbState::try_from("greEN").unwrap(), DeviceInfoVbState::Green);
         assert_eq!(DeviceInfoVbState::try_from("YeLLoW").unwrap(), DeviceInfoVbState::Yellow);
         assert_eq!(DeviceInfoVbState::try_from("ORange").unwrap(), DeviceInfoVbState::Orange);
-        DeviceInfoVbState::try_from("bad").unwrap_err();
+        assert_eq!(DeviceInfoVbState::try_from("bad").unwrap(), DeviceInfoVbState::Factory);
     }
 
     #[test]
@@ -202,6 +210,9 @@ mod tests {
             DeviceInfoSecurityLevel::StrongBox
         );
         assert_eq!(DeviceInfoSecurityLevel::try_from("TeE").unwrap(), DeviceInfoSecurityLevel::Tee);
-        DeviceInfoSecurityLevel::try_from("insecure").unwrap_err();
+        assert_eq!(
+            DeviceInfoSecurityLevel::try_from("insecure").unwrap(),
+            DeviceInfoSecurityLevel::Factory
+        );
     }
 }

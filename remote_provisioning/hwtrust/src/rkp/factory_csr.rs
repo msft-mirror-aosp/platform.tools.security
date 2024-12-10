@@ -9,7 +9,7 @@ use std::str::FromStr;
 /// (Certificate Signing Request) format for this as an implementation convenience. The CSR
 /// actually contains an empty set of keys for which certificates are needed.
 #[non_exhaustive]
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct FactoryCsr {
     /// The CSR, as created by an IRemotelyProvisionedComponent HAL.
     pub csr: Csr,

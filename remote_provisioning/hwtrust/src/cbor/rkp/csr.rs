@@ -1,13 +1,14 @@
 use std::collections::HashMap;
 
 use crate::cbor::field_value::FieldValue;
-use crate::cbor::{serialize, value_from_bytes};
+use crate::cbor::{canonicalize_map, serialize, value_from_bytes};
 use crate::dice::ChainForm;
-use crate::rkp::{Csr, CsrPayload, DeviceInfo, ProtectedData};
+use crate::rkp::{Csr, CsrPayload, DeviceInfo, DeviceInfoVersion, KeysToSign, ProtectedData};
 use crate::session::{RkpInstance, Session};
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use base64::{prelude::BASE64_STANDARD, Engine};
 use ciborium::value::Value;
+use coset::{AsCborValue, CoseKey};
 use openssl::pkey::Id;
 use openssl::stack::Stack;
 use openssl::x509::store::X509StoreBuilder;
@@ -15,6 +16,19 @@ use openssl::x509::verify::X509VerifyFlags;
 use openssl::x509::{X509StoreContext, X509};
 
 const VERSION_OR_DEVICE_INFO_INDEX: usize = 0;
+
+impl KeysToSign {
+    pub(crate) fn from_bytes(buffer: &[u8]) -> Result<Self> {
+        let value = value_from_bytes(buffer)?;
+        let field_value = FieldValue::from_value("KeysToSign", value);
+        Self::from_value(field_value)
+    }
+    fn from_value(value: FieldValue) -> Result<KeysToSign> {
+        Ok(KeysToSign(
+            value.into_array()?.into_iter().map(|v| CoseKey::from_cbor_value(v).unwrap()).collect(),
+        ))
+    }
+}
 
 impl CsrPayload {
     fn from_value(value: &Value, session: &Session) -> Result<Self> {
@@ -51,10 +65,14 @@ impl CsrPayload {
             ),
         }
 
-        let device_info = DeviceInfo::from_cbor_values(device_info.into_map()?, Some(3))?;
-        let keys_to_sign = serialize(keys_to_sign.value().unwrap());
+        let device_info = DeviceInfo::from_cbor_values(
+            device_info.into_map()?,
+            Some(DeviceInfoVersion::V3),
+            session.options.is_factory,
+        )?;
+        let keys_to_sign = KeysToSign::from_value(keys_to_sign)?;
 
-        Ok(CsrPayload { certificate_type, device_info, keys_to_sign })
+        Ok(CsrPayload { serialized, certificate_type, device_info, keys_to_sign })
     }
 }
 
@@ -98,8 +116,21 @@ impl Csr {
 
         ensure!(device_info.len() == 2, "Device info should contain exactly 2 entries");
         device_info.pop(); // ignore unverified info
-        let verified_device_info = match device_info.pop() {
-            Some(Value::Map(d)) => Value::Map(d),
+        let device_info = device_info.pop().unwrap();
+        let device_info_serialized = serialize(device_info.clone());
+        let device_info_canonicalized = canonicalize_map(device_info.clone())?;
+        if device_info_canonicalized != device_info_serialized {
+            match session.options.verbose {
+                true => bail!(
+                    "Device info is not canonical:\nexpected: {:?}\nactual: {:?}",
+                    &hex::encode(device_info_canonicalized),
+                    &hex::encode(device_info_serialized)
+                ),
+                false => bail!("Device info is not canonical"),
+            }
+        }
+        let verified_device_info = match device_info {
+            Value::Map(d) => Value::Map(d),
             other => bail!("Expected a map for verified device info, found '{:?}'", other),
         };
 
@@ -117,7 +148,11 @@ impl Csr {
         };
 
         Ok(Self::V2 {
-            device_info: DeviceInfo::from_cbor_values(verified_device_info, None)?,
+            device_info: DeviceInfo::from_cbor_values(
+                verified_device_info,
+                None, // version must be determined by "version" in DeviceInfo
+                session.options.is_factory,
+            )?,
             challenge,
             protected_data,
         })
@@ -357,7 +392,7 @@ mod tests {
         let Csr::V3 { dice_chain, csr_payload, .. } = csr else {
             panic!("Parsed CSR was not V3: {:?}", csr);
         };
-        assert_eq!(csr_payload.device_info.security_level, Some(DeviceInfoSecurityLevel::Avf));
+        assert_eq!(csr_payload.device_info.security_level, DeviceInfoSecurityLevel::Avf);
         let ChainForm::Proper(proper_chain) = dice_chain else {
             panic!("Parsed chain is not proper: {:?}", dice_chain);
         };
@@ -515,8 +550,8 @@ pub(crate) mod testutil {
             system_patch_level: 20221025,
             boot_patch_level: 20221026,
             vendor_patch_level: 20221027,
-            security_level: Some(DeviceInfoSecurityLevel::Tee),
-            fused: true,
+            security_level: DeviceInfoSecurityLevel::Tee,
+            fused: 1,
         }
     }
 }

@@ -30,6 +30,10 @@ impl ProtectedData {
     pub fn dice_chain(&self) -> ChainForm {
         self.dice_chain.clone()
     }
+
+    pub fn uds_certs(&self) -> Option<UdsCerts> {
+        self.uds_certs.clone()
+    }
 }
 
 impl UdsCerts {

@@ -19,8 +19,6 @@ pub enum FieldValueError {
     NotI64(&'static str, Value),
     #[error("expected u64 for field {0}, but found `{1:?}`")]
     NotU64(&'static str, Value),
-    #[error("expected boolean for field {0}, but found `{1:?}`")]
-    NotBool(&'static str, Value),
     #[error("expected map for field {0}, but found `{1:?}`")]
     NotMap(&'static str, Value),
     #[error("expected array for field {0}, but found `{1:?}`")]
@@ -43,10 +41,6 @@ pub(super) struct FieldValue {
 impl FieldValue {
     pub fn new(name: &'static str) -> Self {
         Self { name, value: None }
-    }
-
-    pub fn value(&self) -> Option<Value> {
-        self.value.clone()
     }
 
     pub fn from_value(name: &'static str, value: Value) -> Self {
@@ -163,21 +157,6 @@ impl FieldValue {
             .map(|v| match v {
                 Value::Map(v) => Ok(v),
                 _ => Err(FieldValueError::NotMap(self.name, v)),
-            })
-            .transpose()
-    }
-
-    pub fn into_bool(self) -> Result<bool, FieldValueError> {
-        require_present(self.name, self.into_optional_bool())
-    }
-
-    pub fn into_optional_bool(self) -> Result<Option<bool>, FieldValueError> {
-        self.value
-            .map(|v| match v {
-                Value::Bool(b) => Ok(b),
-                Value::Integer(i) if i == 0.into() => Ok(false),
-                Value::Integer(i) if i == 1.into() => Ok(true),
-                _ => Err(FieldValueError::NotBool(self.name, v)),
             })
             .transpose()
     }
