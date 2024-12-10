@@ -22,6 +22,10 @@ pub struct Options {
     pub allow_any_mode: bool,
     /// The RKP instance associated to the session.
     pub rkp_instance: RkpInstance,
+    /// This flag is used during DeviceInfo validation
+    pub is_factory: bool,
+    /// Verbose output
+    pub verbose: bool,
 }
 
 /// The set of RKP instances associated to the session.
@@ -56,6 +60,11 @@ impl FromStr for RkpInstance {
 }
 
 impl Session {
+    /// Set is_factory
+    pub fn set_is_factory(&mut self, is_factory: bool) {
+        self.options.is_factory = is_factory;
+    }
+
     /// Set allow_any_mode.
     pub fn set_allow_any_mode(&mut self, allow_any_mode: bool) {
         self.options.allow_any_mode = allow_any_mode
