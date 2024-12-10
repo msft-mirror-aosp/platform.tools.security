@@ -85,11 +85,11 @@ Csr::~Csr() {}
 Csr::Csr(std::unique_ptr<BoxedCsr> csr, DiceChain::Kind kind, std::string_view instance) noexcept
     : mCsr(std::move(csr)), mKind(kind), mInstance(instance.data()) {}
 
-Result<Csr> Csr::validate(const std::vector<uint8_t>& request, DiceChain::Kind kind, bool allowAnyMode,
-    std::string_view instance) noexcept {
+Result<Csr> Csr::validate(const std::vector<uint8_t>& request, DiceChain::Kind kind, bool isFactory,
+    bool allowAnyMode, std::string_view instance) noexcept {
     rust::DiceChainKind chainKind = convertKind(kind);
     auto result = rust::validateCsr(
-        {request.data(), request.size()}, chainKind, allowAnyMode, instance.data());
+        {request.data(), request.size()}, chainKind, isFactory, allowAnyMode, instance.data());
     if (!result.error.empty()) {
         return Error() << static_cast<std::string>(result.error);
     }
@@ -102,6 +102,34 @@ Result<DiceChain> Csr::getDiceChain() const noexcept {
         return Error() << static_cast<std::string>(result.error);
     }
   return DiceChain(BoxedDiceChain::moveFrom(result.chain), result.len);
+}
+
+bool Csr::hasUdsCerts() const noexcept {
+    return rust::csrHasUdsCerts(**mCsr);
+}
+
+Result<std::vector<uint8_t>> Csr::getCsrPayload() const noexcept {
+    auto vector = rust::getCsrPayloadFromCsr(**mCsr);
+    if (vector.empty()) {
+        return Error() << "Failed to get CsrPayload";
+    }
+    return std::vector<uint8_t>{vector.begin(), vector.end()};
+}
+
+Result<bool> Csr::compareKeysToSign(const std::vector<uint8_t>& keysToSign) const noexcept {
+    auto result = rust::compareKeysToSignInCsr(**mCsr, {keysToSign.data(), keysToSign.size()});
+    if (!result.error.empty()) {
+        return Error() << static_cast<std::string>(result.error);
+    }
+    return result.value;
+}
+
+Result<bool> Csr::compareChallenge(const std::vector<uint8_t>& challenge) const noexcept {
+    auto result = rust::compareChallengeInCsr(**mCsr, {challenge.data(), challenge.size()});
+    if (!result.error.empty()) {
+        return Error() << static_cast<std::string>(result.error);
+    }
+    return result.value;
 }
 
 } // namespace hwtrust

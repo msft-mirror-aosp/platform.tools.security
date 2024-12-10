@@ -45,6 +45,11 @@ mod ffi {
         csr: Box<Csr>,
     }
 
+    struct BoolResult {
+        error: String,
+        value: bool,
+    }
+
     extern "Rust" {
         type DiceChain;
 
@@ -68,12 +73,25 @@ mod ffi {
         fn validate_csr(
             csr: &[u8],
             kind: DiceChainKind,
+            is_factory: bool,
             allow_any_mode: bool,
             instance: &str,
         ) -> ValidateCsrResult;
 
         #[cxx_name = getDiceChainFromCsr]
         fn get_dice_chain_from_csr(csr: &Csr) -> VerifyDiceChainResult;
+
+        #[cxx_name = csrHasUdsCerts]
+        fn csr_has_uds_certs(csr: &Csr) -> bool;
+
+        #[cxx_name = getCsrPayloadFromCsr]
+        fn get_csr_payload_from_csr(csr: &Csr) -> Vec<u8>;
+
+        #[cxx_name = compareKeysToSignInCsr]
+        fn compare_keys_to_sign_in_csr(csr: &Csr, keys_to_sign: &[u8]) -> BoolResult;
+
+        #[cxx_name = compareChallengeInCsr]
+        fn compare_challenge_in_csr(csr: &Csr, challenge: &[u8]) -> BoolResult;
     }
 }
 
@@ -155,6 +173,7 @@ pub struct Csr(Option<InnerCsr>);
 fn validate_csr(
     csr: &[u8],
     kind: ffi::DiceChainKind,
+    is_factory: bool,
     allow_any_mode: bool,
     instance: &str,
 ) -> ffi::ValidateCsrResult {
@@ -178,6 +197,7 @@ fn validate_csr(
             csr: Box::new(Csr(None)),
         };
     };
+    session.set_is_factory(is_factory);
     session.set_allow_any_mode(allow_any_mode);
     session.set_rkp_instance(rkp_instance);
     match InnerCsr::from_cbor(&session, csr) {
@@ -205,5 +225,39 @@ fn get_dice_chain_from_csr(csr: &Csr) -> ffi::VerifyDiceChainResult {
             chain: Box::new(DiceChain(None)),
             len: 0,
         },
+    }
+}
+
+fn csr_has_uds_certs(csr: &Csr) -> bool {
+    match csr {
+        Csr(Some(csr)) => csr.has_uds_certs(),
+        _ => false,
+    }
+}
+
+fn get_csr_payload_from_csr(csr: &Csr) -> Vec<u8> {
+    match csr {
+        Csr(Some(csr)) => csr.csr_payload(),
+        _ => Vec::new(),
+    }
+}
+
+fn compare_keys_to_sign_in_csr(csr: &Csr, keys_to_sign: &[u8]) -> ffi::BoolResult {
+    match csr {
+        Csr(Some(csr)) => {
+            ffi::BoolResult { error: "".to_string(), value: csr.compare_keys_to_sign(keys_to_sign) }
+        }
+        _ => {
+            ffi::BoolResult { error: "KeysToSign could not be compared".to_string(), value: false }
+        }
+    }
+}
+
+fn compare_challenge_in_csr(csr: &Csr, challenge: &[u8]) -> ffi::BoolResult {
+    match csr {
+        Csr(Some(csr)) => {
+            ffi::BoolResult { error: "".to_string(), value: challenge == csr.challenge() }
+        }
+        _ => ffi::BoolResult { error: "challenge could not be compared".to_string(), value: false },
     }
 }
