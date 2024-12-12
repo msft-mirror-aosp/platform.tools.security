@@ -33,7 +33,10 @@ public:
   ~DiceChain();
   DiceChain(DiceChain&&) = default;
 
+  // The root public key (UDS public key) is not included here
   Result<std::vector<std::vector<uint8_t>>> CosePublicKeys() const noexcept;
+
+  Result<bool> compareRootPublicKey(const DiceChain& other) const noexcept;
 
   bool IsProper() const noexcept;
 
@@ -48,13 +51,21 @@ struct BoxedCsr;
 
 class Csr final {
 public:
-  static Result<Csr> validate(const std::vector<uint8_t>& csr, DiceChain::Kind kind,
+  static Result<Csr> validate(const std::vector<uint8_t>& csr, DiceChain::Kind kind, bool isFactory,
     bool allowAnyMode, std::string_view instance) noexcept;
 
   ~Csr();
   Csr(Csr&&) = default;
 
   Result<DiceChain> getDiceChain() const noexcept;
+
+  bool hasUdsCerts() const noexcept;
+
+  Result<std::vector<uint8_t>> getCsrPayload() const noexcept;
+
+  Result<bool> compareKeysToSign(const std::vector<uint8_t>& keysToSign) const noexcept;
+
+  Result<bool> compareChallenge(const std::vector<uint8_t>& challenge) const noexcept;
 
   private:
     Csr(std::unique_ptr<BoxedCsr> csr, DiceChain::Kind kind, std::string_view instance) noexcept;
