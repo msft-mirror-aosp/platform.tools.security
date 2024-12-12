@@ -75,6 +75,14 @@ Result<std::vector<std::vector<uint8_t>>> DiceChain::CosePublicKeys() const noex
   return result;
 }
 
+Result<bool> DiceChain::compareRootPublicKey(const DiceChain& other) const noexcept {
+    auto result = rust::compareRootPublicKeyInDiceChain(**chain_, **other.chain_);
+    if (!result.error.empty()) {
+        return Error() << static_cast<std::string>(result.error);
+    }
+    return result.value;
+}
+
 bool DiceChain::IsProper() const noexcept {
   return rust::IsDiceChainProper(**chain_);
 }

@@ -33,7 +33,10 @@ public:
   ~DiceChain();
   DiceChain(DiceChain&&) = default;
 
+  // The root public key (UDS public key) is not included here
   Result<std::vector<std::vector<uint8_t>>> CosePublicKeys() const noexcept;
+
+  Result<bool> compareRootPublicKey(const DiceChain& other) const noexcept;
 
   bool IsProper() const noexcept;
 
