@@ -11,7 +11,7 @@ pub enum DiceMode {
     NotConfigured,
     /// The device is operating normally under secure configuration.
     Normal,
-    /// At least one criteria for [`Normal`] is not met and the device is not in a secure state.
+    /// At least one criterion for [`Normal`] is not met and the device is not in a secure state.
     Debug,
     /// A recovery or maintenance mode of some kind.
     Recovery,
