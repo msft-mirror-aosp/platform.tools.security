@@ -3,6 +3,7 @@
 
 use coset::CborSerializable;
 use hwtrust::dice::ChainForm;
+use hwtrust::dice::DiceMode;
 use hwtrust::rkp::Csr as InnerCsr;
 use hwtrust::session::{Options, RkpInstance, Session};
 use std::str::FromStr;
@@ -72,6 +73,9 @@ mod ffi {
 
         #[cxx_name = componentNameInDiceChainContains]
         fn component_name_in_dice_chain_contains(chain: &DiceChain, substring: &str) -> BoolResult;
+
+        #[cxx_name = hasNonNormalModeInDiceChain]
+        fn has_non_normal_mode_in_dice_chain(chain: &DiceChain) -> BoolResult;
 
         #[cxx_name = IsDiceChainProper]
         fn is_dice_chain_proper(chain: &DiceChain) -> bool;
@@ -209,6 +213,20 @@ fn component_name_in_dice_chain_contains(chain: &DiceChain, substring: &str) -> 
             }
         },
         _ => ffi::BoolResult { error: "A DICE chain must be provided".to_string(), value: false },
+    }
+}
+
+fn has_non_normal_mode_in_dice_chain(chain: &DiceChain) -> ffi::BoolResult {
+    match chain {
+        DiceChain(Some(ChainForm::Proper(chain))) => {
+            let has_non_normal_mode =
+                chain.payloads().iter().any(|payload| payload.mode() != DiceMode::Normal);
+            ffi::BoolResult { error: "".to_string(), value: has_non_normal_mode }
+        }
+        _ => ffi::BoolResult {
+            error: "A proper DICE chain must be provided".to_string(),
+            value: false,
+        },
     }
 }
 
