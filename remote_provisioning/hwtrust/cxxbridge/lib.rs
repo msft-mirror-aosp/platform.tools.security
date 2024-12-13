@@ -70,6 +70,9 @@ mod ffi {
             chain2: &DiceChain,
         ) -> BoolResult;
 
+        #[cxx_name = componentNameInDiceChainContains]
+        fn component_name_in_dice_chain_contains(chain: &DiceChain, substring: &str) -> BoolResult;
+
         #[cxx_name = IsDiceChainProper]
         fn is_dice_chain_proper(chain: &DiceChain) -> bool;
 
@@ -178,6 +181,34 @@ fn compare_root_public_key_in_dice_chain(
             error: "Two proper DICE chains were not provided".to_string(),
             value: false,
         },
+    }
+}
+
+fn component_name_in_dice_chain_contains(chain: &DiceChain, substring: &str) -> ffi::BoolResult {
+    match chain {
+        DiceChain(Some(chain)) => match chain {
+            ChainForm::Proper(chain) => {
+                match chain
+                    .payloads()
+                    .last()
+                    .expect("leaf cert was empty")
+                    .config_desc()
+                    .component_name()
+                {
+                    Some(name) => {
+                        ffi::BoolResult { error: "".to_string(), value: name.contains(substring) }
+                    }
+                    None => ffi::BoolResult {
+                        error: "component name could not be retrieved".to_string(),
+                        value: false,
+                    },
+                }
+            }
+            ChainForm::Degenerate(_) => {
+                ffi::BoolResult { error: "DICE chain is degenerate".to_string(), value: false }
+            }
+        },
+        _ => ffi::BoolResult { error: "A DICE chain must be provided".to_string(), value: false },
     }
 }
 

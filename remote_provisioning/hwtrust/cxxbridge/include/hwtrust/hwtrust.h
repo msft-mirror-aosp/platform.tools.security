@@ -38,6 +38,8 @@ public:
 
   Result<bool> compareRootPublicKey(const DiceChain& other) const noexcept;
 
+  Result<bool> componentNameContains(std::string_view value) const noexcept;
+
   bool IsProper() const noexcept;
 
 private:
