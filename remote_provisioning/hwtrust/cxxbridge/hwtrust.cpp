@@ -91,6 +91,14 @@ Result<bool> DiceChain::componentNameContains(std::string_view value) const noex
     return result.value;
 }
 
+Result<bool> DiceChain::hasNonNormalMode() const noexcept {
+    auto result = rust::hasNonNormalModeInDiceChain(**chain_);
+    if (!result.error.empty()) {
+        return Error() << static_cast<std::string>(result.error);
+    }
+    return result.value;
+}
+
 bool DiceChain::IsProper() const noexcept {
   return rust::IsDiceChainProper(**chain_);
 }
