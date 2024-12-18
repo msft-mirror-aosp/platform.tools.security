@@ -11,7 +11,7 @@ pub enum DiceMode {
     NotConfigured,
     /// The device is operating normally under secure configuration.
     Normal,
-    /// At least one criteria for [`Normal`] is not met and the device is not in a secure state.
+    /// At least one criterion for [`Normal`] is not met and the device is not in a secure state.
     Debug,
     /// A recovery or maintenance mode of some kind.
     Recovery,
@@ -81,6 +81,11 @@ impl Payload {
     /// Gets the authority hash of the payload.
     pub fn authority_hash(&self) -> &[u8] {
         &self.authority_hash
+    }
+
+    /// Returns whether the payload has an RKP VM marker.
+    pub fn has_rkpvm_marker(&self) -> bool {
+        self.config_desc.rkp_vm_marker()
     }
 }
 
