@@ -26,6 +26,14 @@ impl ProtectedData {
     pub fn new(mac_key: Vec<u8>, dice_chain: ChainForm, uds_certs: Option<UdsCerts>) -> Self {
         Self { mac_key, dice_chain, uds_certs }
     }
+
+    pub fn dice_chain(&self) -> ChainForm {
+        self.dice_chain.clone()
+    }
+
+    pub fn uds_certs(&self) -> Option<UdsCerts> {
+        self.uds_certs.clone()
+    }
 }
 
 impl UdsCerts {
