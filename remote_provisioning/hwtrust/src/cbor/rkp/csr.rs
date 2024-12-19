@@ -172,6 +172,9 @@ impl Csr {
         if csr.len() == 5 {
             FieldValue::from_optional_value("UnverifiedDeviceInfo", csr.pop());
         }
+        if csr.len() != 4 {
+            bail!("AuthenticatedRequest should have 4 elements. Found {}.", csr.len());
+        }
 
         let signed_data =
             FieldValue::from_optional_value("SignedData", csr.pop()).into_cose_sign1()?;
