@@ -40,16 +40,15 @@ pub enum Csr {
         /// Contains the plaintext of the payload that was encrypted to an EEK.
         protected_data: ProtectedData,
     },
-    /// CSR V3 was introduced in Android T. This version drops encryption of the payload.
+    /// CSR V3 was introduced in Android U. This version drops encryption of the payload.
     V3 {
         /// The DICE chain for the device
         dice_chain: ChainForm,
         /// X.509 certificate chain that certifies the dice_chain root key (UDS_pub)
         uds_certs: HashMap<String, Vec<X509>>,
-        /// This is the challenge that is authenticated inside the signed data.
-        /// The signed data is version (3), certificate type, device info, and keys to sign
+        /// The challenge that is authenticated inside the signed data.
         challenge: Vec<u8>,
-        /// csr payload
+        /// The payload of the signed data.
         csr_payload: CsrPayload,
     },
 }

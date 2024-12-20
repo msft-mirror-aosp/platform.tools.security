@@ -7,7 +7,7 @@ use std::fmt;
 /// Describes a device that is registered with the RKP backend. This implementation contains fields
 /// common to all versions defined in DeviceInfo.aidl.
 pub struct DeviceInfo {
-    /// Version of this data structure.
+    /// Version of this data structure. Currently, this is the same as the HAL version.
     pub version: DeviceInfoVersion,
     /// The device's marketed brand.
     pub brand: String,
@@ -121,11 +121,12 @@ impl TryFrom<&str> for DeviceInfoVbState {
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-/// The version of the DeviceInfo structure, which may updated with HAL changes.
+/// The version of the DeviceInfo structure, which may update with HAL changes.
+/// Currently, this is the same as the HAL version.
 pub enum DeviceInfoVersion {
     /// First supported version. Prior to this (V1), almost all fields were optional.
     V2,
-    /// Explicit version removed from the CBOR. Otherwise identical to V2.
+    /// Explicit version removed from the CBOR. Otherwise, identical to V2.
     V3,
 }
 
@@ -136,7 +137,7 @@ impl TryFrom<u32> for DeviceInfoVersion {
         match i {
             2 => Ok(Self::V2),
             3 => Ok(Self::V3),
-            _ => Err(anyhow!("Invalid version: `{i}`")),
+            _ => Err(anyhow!("Invalid DeviceInfo version: `{i}`")),
         }
     }
 }

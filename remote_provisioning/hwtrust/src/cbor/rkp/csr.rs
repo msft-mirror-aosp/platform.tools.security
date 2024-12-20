@@ -48,7 +48,7 @@ impl CsrPayload {
             FieldValue::from_optional_value("CertificateType", csr_payload.pop());
         let version = FieldValue::from_optional_value("Version", csr_payload.pop()).into_u64()?;
         if version != 3 {
-            bail!("Invalid CSR version. Only '3' is supported");
+            bail!("Invalid CsrPayload version. Only '3' is supported");
         }
 
         let certificate_type = certificate_type.into_string()?;
@@ -164,13 +164,19 @@ impl Csr {
         version: i128,
     ) -> Result<Self> {
         if version != 1 {
-            bail!("Invalid CSR version. Only '1' is supported, found '{}", version);
+            bail!(
+                "Invalid AuthenticatedRequest version. Only '1' is supported, found '{}",
+                version
+            );
         }
 
         // CSRs that are uploaded to the backend have an additional unverified info field tacked
         // onto them. We just ignore that, so if it's there pop it and move on.
         if csr.len() == 5 {
             FieldValue::from_optional_value("UnverifiedDeviceInfo", csr.pop());
+        }
+        if csr.len() != 4 {
+            bail!("AuthenticatedRequest should have 4 elements. Found {}.", csr.len());
         }
 
         let signed_data =
