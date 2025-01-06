@@ -9,6 +9,7 @@ rust_defaults {
     rustlibs: [
         "libanyhow",
         "libbase64_rust",
+        "libchrono",
         "libciborium",
         "libclap",
         "libcoset",
@@ -21,11 +22,13 @@ rust_defaults {
         host: {
             rlibs: ["libopenssl_static"],
             // dylib is disabled due to compile failure in libhwtrust. See b/373621186 for details.
-            dylib: { enabled: false, },
+            dylib: {
+                enabled: false,
+            },
         },
         android: {
             rustlibs: ["libopenssl"],
-        }
+        },
     },
 }
 
@@ -33,6 +36,7 @@ rust_library {
     name: "libhwtrust",
     defaults: ["libhwtrust_defaults"],
     crate_name: "hwtrust",
+    product_available: true,
     vendor_available: true,
     apex_available: [
         "//apex_available:platform",
@@ -73,7 +77,7 @@ rust_binary {
             },
             static_executable: true,
         },
-    }
+    },
 }
 
 rust_test {
@@ -91,7 +95,7 @@ rust_test {
     compile_multilib: "first",
 }
 
-filegroup(
-    name = "testdata",
-    srcs = ["testdata/**/*"],
-)
+filegroup {
+    name: "testdata",
+    srcs: ["testdata/**/*"],
+}

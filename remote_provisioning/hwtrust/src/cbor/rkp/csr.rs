@@ -1,19 +1,80 @@
 use std::collections::HashMap;
 
 use crate::cbor::field_value::FieldValue;
-use crate::cbor::value_from_bytes;
+use crate::cbor::{canonicalize_map, serialize, value_from_bytes};
 use crate::dice::ChainForm;
-use crate::rkp::{Csr, DeviceInfo, ProtectedData};
+use crate::rkp::{Csr, CsrPayload, DeviceInfo, DeviceInfoVersion, KeysToSign, ProtectedData};
 use crate::session::{RkpInstance, Session};
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use base64::{prelude::BASE64_STANDARD, Engine};
 use ciborium::value::Value;
+use coset::{AsCborValue, CoseKey};
 use openssl::pkey::Id;
 use openssl::stack::Stack;
 use openssl::x509::store::X509StoreBuilder;
+use openssl::x509::verify::X509VerifyFlags;
 use openssl::x509::{X509StoreContext, X509};
 
 const VERSION_OR_DEVICE_INFO_INDEX: usize = 0;
+
+impl KeysToSign {
+    pub(crate) fn from_bytes(buffer: &[u8]) -> Result<Self> {
+        let value = value_from_bytes(buffer)?;
+        let field_value = FieldValue::from_value("KeysToSign", value);
+        Self::from_value(field_value)
+    }
+    fn from_value(value: FieldValue) -> Result<KeysToSign> {
+        Ok(KeysToSign(
+            value.into_array()?.into_iter().map(|v| CoseKey::from_cbor_value(v).unwrap()).collect(),
+        ))
+    }
+}
+
+impl CsrPayload {
+    fn from_value(value: &Value, session: &Session) -> Result<Self> {
+        let serialized = match value.clone().into_bytes() {
+            Ok(bytes) => bytes,
+            Err(_) => bail!("CsrPayload had no bytes"),
+        };
+
+        let mut csr_payload = match value_from_bytes(serialized.as_slice())? {
+            Value::Array(a) => a,
+            other => bail!("CsrPayload is expected to be an array, found {other:?}"),
+        };
+
+        let keys_to_sign = FieldValue::from_optional_value("KeysToSign", csr_payload.pop());
+        let device_info = FieldValue::from_optional_value("DeviceInfo", csr_payload.pop());
+        let certificate_type =
+            FieldValue::from_optional_value("CertificateType", csr_payload.pop());
+        let version = FieldValue::from_optional_value("Version", csr_payload.pop()).into_u64()?;
+        if version != 3 {
+            bail!("Invalid CsrPayload version. Only '3' is supported");
+        }
+
+        let certificate_type = certificate_type.into_string()?;
+
+        const CERTIFICATE_TYPE_RKPVM: &str = "rkp-vm";
+        match session.options.rkp_instance {
+            RkpInstance::Avf => ensure!(
+                CERTIFICATE_TYPE_RKPVM == certificate_type,
+                "CertificateType must be 'rkp-vm' for AVF"
+            ),
+            _ => ensure!(
+                CERTIFICATE_TYPE_RKPVM != certificate_type,
+                "CertificateType must not be 'rkp-vm' for non-AVF"
+            ),
+        }
+
+        let device_info = DeviceInfo::from_cbor_values(
+            device_info.into_map()?,
+            Some(DeviceInfoVersion::V3),
+            session.options.is_factory,
+        )?;
+        let keys_to_sign = KeysToSign::from_value(keys_to_sign)?;
+
+        Ok(CsrPayload { serialized, certificate_type, device_info, keys_to_sign })
+    }
+}
 
 impl Csr {
     /// Parse base64-encoded CBOR data as a Certificate Signing Request.
@@ -55,8 +116,21 @@ impl Csr {
 
         ensure!(device_info.len() == 2, "Device info should contain exactly 2 entries");
         device_info.pop(); // ignore unverified info
-        let verified_device_info = match device_info.pop() {
-            Some(Value::Map(d)) => Value::Map(d),
+        let device_info = device_info.pop().unwrap();
+        let device_info_serialized = serialize(device_info.clone());
+        let device_info_canonicalized = canonicalize_map(device_info.clone())?;
+        if device_info_canonicalized != device_info_serialized {
+            match session.options.verbose {
+                true => bail!(
+                    "Device info is not canonical:\nexpected: {:?}\nactual: {:?}",
+                    &hex::encode(device_info_canonicalized),
+                    &hex::encode(device_info_serialized)
+                ),
+                false => bail!("Device info is not canonical"),
+            }
+        }
+        let verified_device_info = match device_info {
+            Value::Map(d) => Value::Map(d),
             other => bail!("Expected a map for verified device info, found '{:?}'", other),
         };
 
@@ -74,7 +148,11 @@ impl Csr {
         };
 
         Ok(Self::V2 {
-            device_info: DeviceInfo::from_cbor_values(verified_device_info, None)?,
+            device_info: DeviceInfo::from_cbor_values(
+                verified_device_info,
+                None, // version must be determined by "version" in DeviceInfo
+                session.options.is_factory,
+            )?,
             challenge,
             protected_data,
         })
@@ -86,7 +164,10 @@ impl Csr {
         version: i128,
     ) -> Result<Self> {
         if version != 1 {
-            bail!("Invalid CSR version. Only '1' is supported, found '{}", version);
+            bail!(
+                "Invalid AuthenticatedRequest version. Only '1' is supported, found '{}",
+                version
+            );
         }
 
         // CSRs that are uploaded to the backend have an additional unverified info field tacked
@@ -94,50 +175,41 @@ impl Csr {
         if csr.len() == 5 {
             FieldValue::from_optional_value("UnverifiedDeviceInfo", csr.pop());
         }
+        if csr.len() != 4 {
+            bail!("AuthenticatedRequest should have 4 elements. Found {}.", csr.len());
+        }
 
         let signed_data =
             FieldValue::from_optional_value("SignedData", csr.pop()).into_cose_sign1()?;
         let raw_dice_chain = csr.pop().ok_or(anyhow!("Missing DiceCertChain"))?;
         let uds_certs = FieldValue::from_optional_value("UdsCerts", csr.pop()).into_map()?;
 
-        let signed_data_payload = signed_data.payload.context("missing payload in SignedData")?;
-        let csr_payload_value = value_from_bytes(&signed_data_payload)
-            .context("SignedData payload is not valid CBOR")?
-            .as_array_mut()
-            .context("SignedData payload is not a CBOR array")?
-            .pop()
-            .context("Missing CsrPayload in SignedData")?;
-        let csr_payload_bytes = csr_payload_value
-            .as_bytes()
-            .context("CsrPayload (in SignedData) is expected to be encoded CBOR")?
-            .as_slice();
-        let mut csr_payload = match value_from_bytes(csr_payload_bytes)? {
-            Value::Array(a) => a,
-            other => bail!("CsrPayload is expected to be an array, found {other:?}"),
-        };
-
-        let _keys_to_sign = FieldValue::from_optional_value("KeysToSign", csr_payload.pop());
-        let device_info = FieldValue::from_optional_value("DeviceInfo", csr_payload.pop());
-        let certificate_type =
-            FieldValue::from_optional_value("CertificateType", csr_payload.pop());
-
-        const CERTIFICATE_TYPE_RKPVM: &str = "rkp-vm";
-        match session.options.rkp_instance {
-            RkpInstance::Avf => ensure!(
-                CERTIFICATE_TYPE_RKPVM == certificate_type.into_string()?,
-                "CertificateType must be 'rkp-vm' for AVF"
-            ),
-            _ => ensure!(
-                CERTIFICATE_TYPE_RKPVM != certificate_type.into_string()?,
-                "CertificateType must not be 'rkp-vm' for non-AVF"
-            ),
-        }
-
         let dice_chain = ChainForm::from_value(session, raw_dice_chain)?;
         let uds_certs = Self::parse_and_validate_uds_certs(&dice_chain, uds_certs)?;
 
-        let device_info = DeviceInfo::from_cbor_values(device_info.into_map()?, Some(3))?;
-        Ok(Self::V3 { device_info, dice_chain, uds_certs })
+        let signing_key = dice_chain.leaf_public_key();
+        signing_key.verify_cose_sign1(&signed_data, &[]).context("verifying SignedData failed")?;
+
+        let signed_data_payload = signed_data.payload.context("missing payload in SignedData")?;
+
+        let mut signed_data_value = value_from_bytes(signed_data_payload.as_slice())
+            .context("SignedData is not valid CBOR")?;
+
+        let signed_data_array =
+            signed_data_value.as_array_mut().context("SignedData is not a CBOR array")?;
+
+        let csr_payload_value =
+            signed_data_array.pop().context("Missing CsrPayload in SignedData")?;
+
+        let csr_payload = CsrPayload::from_value(&csr_payload_value, session)
+            .context("Unable to parse CsrPayload")?;
+
+        let challenge = match signed_data_array.pop().context("missing challenge")?.into_bytes() {
+            Ok(challenge) => challenge,
+            Err(_) => bail!("Challenge is not bytes"),
+        };
+
+        Ok(Self::V3 { dice_chain, uds_certs, challenge, csr_payload })
     }
 
     fn parse_and_validate_uds_certs(
@@ -199,6 +271,10 @@ impl Csr {
 
         let mut root_store_builder = X509StoreBuilder::new()?;
         root_store_builder.add_cert(root)?;
+        // Setting this flag causes the signature on the root certificate to be checked.
+        // This ensures that the root certificate has not been corrupted.
+        root_store_builder.set_flags(X509VerifyFlags::CHECK_SS_SIGNATURE)?;
+
         let root_store = root_store_builder.build();
 
         let mut store = X509StoreContext::new()?;
@@ -268,12 +344,13 @@ mod tests {
     fn from_base64_valid_v3() {
         let input = fs::read_to_string("testdata/csr/v3_csr.base64").unwrap().trim().to_owned();
         let csr = Csr::from_base64_cbor(&Session::default(), &input).unwrap();
-        if let Csr::V3 { device_info, dice_chain, uds_certs } = csr {
-            assert_eq!(device_info, test_device_info(DeviceInfoVersion::V3));
+        if let Csr::V3 { dice_chain, uds_certs, csr_payload, .. } = csr {
+            assert_eq!(csr_payload.device_info, test_device_info(DeviceInfoVersion::V3));
             let root_public_key = parse_pem_public_key_or_panic(
                 "-----BEGIN PUBLIC KEY-----\n\
-                MCowBQYDK2VwAyEA3FEn/nhqoGOKNok1AJaLfTKI+aFXHf4TfC42vUyPU6s=\n\
-                -----END PUBLIC KEY-----\n",
+                    MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEh5NUV4872vKEL3XPSp8lfkV4AN3J\n\
+                KJti1Y5kbbR9ucTpSyoOjX9UmBCM/uuPU/MGXMWrgbBf3++02ALzC+V3eQ==\n\
+                    -----END PUBLIC KEY-----\n",
             );
             match dice_chain {
                 ChainForm::Proper(proper_chain) => {
@@ -318,10 +395,10 @@ mod tests {
         session.set_allow_any_mode(true);
         session.set_rkp_instance(RkpInstance::Avf);
         let csr = Csr::from_cbor(&session, input.as_slice())?;
-        let Csr::V3 { device_info, dice_chain, .. } = csr else {
+        let Csr::V3 { dice_chain, csr_payload, .. } = csr else {
             panic!("Parsed CSR was not V3: {:?}", csr);
         };
-        assert_eq!(device_info.security_level, Some(DeviceInfoSecurityLevel::Avf));
+        assert_eq!(csr_payload.device_info.security_level, DeviceInfoSecurityLevel::Avf);
         let ChainForm::Proper(proper_chain) = dice_chain else {
             panic!("Parsed chain is not proper: {:?}", dice_chain);
         };
@@ -348,6 +425,104 @@ mod tests {
     fn from_invalid_base64() {
         let err = Csr::from_base64_cbor(&Session::default(), &"not base64").unwrap_err();
         assert!(err.to_string().contains("invalid base64"));
+    }
+
+    const VALID_UDS_CHAIN: &[&str] = &[
+        "-----BEGIN CERTIFICATE-----\n\
+    MIICKjCCAbCgAwIBAgIUPFTOIhGtj7sELYJk5HicdV8r/x8wCgYIKoZIzj0EAwMw\n\
+    RzELMAkGA1UEBhMCVVMxCzAJBgNVBAgMAkNBMQ8wDQYDVQQKDAZHb29nbGUxGjAY\n\
+    BgNVBAMMEVRFU1QgSU5URVJNRURJQVRFMCAXDTI0MTExNDIwMTcwOFoYDzIxMjQx\n\
+    MDIxMjAxNzA4WjA/MQswCQYDVQQGEwJVUzELMAkGA1UECAwCQ0ExDzANBgNVBAoM\n\
+    Bkdvb2dsZTESMBAGA1UEAwwJVEVTVCBMRUFGMHYwEAYHKoZIzj0CAQYFK4EEACID\n\
+    YgAEry9HebgpyEnmimjtgs1KN5akdUx6cAEKVwkj0ZkYIW9V+YeRa4ap4yWvh8ZG\n\
+    U1GA0Eu26z7YQZbPuJ8LnyW0cXj3UGpXgP8EWyftWdz9EX6WpzdO7fuxtxeC/X2l\n\
+    ZuFIo2MwYTAdBgNVHQ4EFgQUWl8nH6cOAU3IrNZ2kqOzq3JUlukwHwYDVR0jBBgw\n\
+    FoAUjtSEVIqjzE6pGwlgEHPRn5o9a0YwDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8B\n\
+    Af8EBAMCB4AwCgYIKoZIzj0EAwMDaAAwZQIxAMmpFFiMRVnZHZSBCqjWQfA0lqaT\n\
+    HiusLqIEcAobDy80/mzO2yO6exNjoXkMB17COwIwD1YmiMkaqnnJkan9CNTnBXZB\n\
+    WNlU9CCE10ohcVfjssl7YVcnna70Rc1UH4DhjSj6\n\
+    -----END CERTIFICATE-----",
+        "-----BEGIN CERTIFICATE-----\n\
+    MIICLjCCAbOgAwIBAgIUKIsXCCFZRvz0BYboKmgZjyGArAEwCgYIKoZIzj0EAwMw\n\
+    PzELMAkGA1UEBhMCVVMxCzAJBgNVBAgMAkNBMQ8wDQYDVQQKDAZHb29nbGUxEjAQ\n\
+    BgNVBAMMCVRFU1QgUk9PVDAgFw0yNDExMTQyMDE1MzVaGA8yMTI0MTAyMTIwMTUz\n\
+    NVowRzELMAkGA1UEBhMCVVMxCzAJBgNVBAgMAkNBMQ8wDQYDVQQKDAZHb29nbGUx\n\
+    GjAYBgNVBAMMEVRFU1QgSU5URVJNRURJQVRFMHYwEAYHKoZIzj0CAQYFK4EEACID\n\
+    YgAEFYWPvG5PCQBBXFi/xY1F3MRqDXHkmqdTErc3wlBakVQmCjiklrEalZhMAr5Q\n\
+    0MYje5/l/ZbN+bvurD5ZsOyWRSrzTkzoUMQszB4fSoJtBp3grcEfd+/tQlC1DZO0\n\
+    wTROo2YwZDAdBgNVHQ4EFgQUjtSEVIqjzE6pGwlgEHPRn5o9a0YwHwYDVR0jBBgw\n\
+    FoAUwQ91rFNLmFq9YMlG1bqk7OvWk44wEgYDVR0TAQH/BAgwBgEB/wIBADAOBgNV\n\
+    HQ8BAf8EBAMCAgQwCgYIKoZIzj0EAwMDaQAwZgIxAMWXmsh6d8YSkP1+wR9eMDCe\n\
+    9G0EFAPOn+BiKfthnnboRUEr8BuIt3w9SkEDCdWfcAIxAMJ99xkGf3bcdykao4jh\n\
+    bgG844IvDSx11EwzQV/kcteHOut93YO0D83CgkDc2C4dNA==\n\
+    -----END CERTIFICATE-----",
+        "-----BEGIN CERTIFICATE-----\n\
+    MIICJTCCAaugAwIBAgIUUo4NdEcdRuQdrm5Trm5x+qvx2LEwCgYIKoZIzj0EAwMw\n\
+    PzELMAkGA1UEBhMCVVMxCzAJBgNVBAgMAkNBMQ8wDQYDVQQKDAZHb29nbGUxEjAQ\n\
+    BgNVBAMMCVRFU1QgUk9PVDAgFw0yNDExMTQyMDEzNDRaGA8yMTI0MTAyMTIwMTM0\n\
+    NFowPzELMAkGA1UEBhMCVVMxCzAJBgNVBAgMAkNBMQ8wDQYDVQQKDAZHb29nbGUx\n\
+    EjAQBgNVBAMMCVRFU1QgUk9PVDB2MBAGByqGSM49AgEGBSuBBAAiA2IABOGIoNBS\n\
+    sVs+mTjZpqOyoWTEOIvIIhuFfi49eqleyKTnekgXyXcJfqppsbqYcgPKaTbJmhU/\n\
+    iuOjaSIUlyf5tjJ7bIOAngopcH6u+Qky/a2Q///eOIl7U9WhEMnSYwZ7rqNmMGQw\n\
+    HQYDVR0OBBYEFMEPdaxTS5havWDJRtW6pOzr1pOOMB8GA1UdIwQYMBaAFMEPdaxT\n\
+    S5havWDJRtW6pOzr1pOOMA4GA1UdDwEB/wQEAwICBDASBgNVHRMBAf8ECDAGAQH/\n\
+    AgEBMAoGCCqGSM49BAMDA2gAMGUCMDa2TefBEmKLebf6KziawLXeQRhqb4wcMgtE\n\
+    RUZ7JOojBC6CqN7xqPMIo2Pp9Pn6iwIxANlSkus723tk6OdeG33A++HwZ9KIXzU4\n\
+    cJUsEeE4pQ5exYACy2Nd+LVtmerw8ZF6xg==\n\
+    -----END CERTIFICATE-----",
+    ];
+
+    const INVALID_UDS_ROOT: &str = "-----BEGIN CERTIFICATE-----\n\
+    MIICJTCCAaugAwIBAgIUUo4NdEcdRuQdrm5Trm5x+qvx2LEwCgYIKoZIzj0EAwMw\n\
+    PzELMAkGA1UEBhMCVVMxCzAJBgNVBAgMAkNBMQ8wDQYDVQQKDAZHb29nbGUxEjAQ\n\
+    BgNVBAMMCVRFU1QgUk9PVDAgFw0yNDExMTQyMDEzNDRaGA8yMTI0MTAyMTIwMTM0\n\
+    NFowPzELMAkGA1UEBhMCVVMxCzAJBgNVBAgMAkNBMQ8wDQYDVQQKDAZHb29nbGUx\n\
+    EjAQBgNVBAMMCVRFU1QgUk9PVDB2MBAGByqGSM49AgEGBSuBBAAiA2IABOGIoNBS\n\
+    sVs+mTjZpqOyoWTEOIvIIhuFfi49eqleyKTnekgXyXcJfqppsbqYcgPKaTbJmhU/\n\
+    iuOjaSIUlyf5tjJ7bIOAngopcH6u+Qky/a2Q///eOIl7U9WhEMnSYwZ7rqNmMGQw\n\
+    HQYDVR0OBBYEFMEPdaxTS5havWDJRtW6pOzr1pOOMB8GA1UdIwQYMBaAFMEPdaxT\n\
+    S5havWDJRtW6pOzr1pOOMA4GA1UdDwEB/wQEAwICBDASBgNVHRMBAf8ECDAGAQH/\n\
+    AgEBMAoGCCqGSM49BAMDA2gAMGUCMDa2TefBEmKLebf6KziawLXeQRhqb4wcMgtE\n\
+    RUZ7JOojBC6CqN7xqPMIo2Pp9Pn6iwIxANlSkus723tk6OdeG33A++HwZ9KIXzU4\n\
+    cJUsEeE4pQ5exYACy2Ndthisisaproblem==\n\
+    -----END CERTIFICATE-----";
+
+    #[test]
+    fn verify_a_valid_cert_chain() {
+        let leaf = X509::from_pem(VALID_UDS_CHAIN[0].as_bytes()).unwrap();
+        let intermediate = X509::from_pem(VALID_UDS_CHAIN[1].as_bytes()).unwrap();
+        let root = X509::from_pem(VALID_UDS_CHAIN[2].as_bytes()).unwrap();
+        let certs = vec![root, intermediate, leaf];
+        let signer = "Test Signer".to_string();
+        let result = Csr::validate_uds_cert_path(&signer, &certs);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn make_sure_root_signature_is_checked() {
+        let leaf = X509::from_pem(VALID_UDS_CHAIN[0].as_bytes()).unwrap();
+        let intermediate = X509::from_pem(VALID_UDS_CHAIN[1].as_bytes()).unwrap();
+        let valid_root = X509::from_pem(VALID_UDS_CHAIN[2].as_bytes()).unwrap();
+        let invalid_root = X509::from_pem(INVALID_UDS_ROOT.as_bytes()).unwrap();
+
+        let valid_root_public_key = valid_root.public_key().unwrap();
+        let invalid_root_public_key = invalid_root.public_key().unwrap();
+        assert!(invalid_root_public_key.public_eq(&valid_root_public_key));
+
+        let certs = vec![invalid_root.clone(), intermediate.clone(), leaf.clone()];
+        let signer = "Test Signer".to_string();
+        let error = Csr::validate_uds_cert_path(&signer, &certs).unwrap_err();
+        assert!(error.to_string().contains("certificate signature failure"));
+
+        let mut intermediates = Stack::new().unwrap();
+        intermediates.push(intermediate).unwrap();
+
+        let mut builder = X509StoreBuilder::new().unwrap();
+        builder.add_cert(invalid_root).unwrap();
+        let store = builder.build();
+
+        let mut context = X509StoreContext::new().unwrap();
+        assert!(context.init(&store, &leaf, &intermediates, |c| c.verify_cert()).unwrap());
     }
 }
 
@@ -381,8 +556,8 @@ pub(crate) mod testutil {
             system_patch_level: 20221025,
             boot_patch_level: 20221026,
             vendor_patch_level: 20221027,
-            security_level: Some(DeviceInfoSecurityLevel::Tee),
-            fused: true,
+            security_level: DeviceInfoSecurityLevel::Tee,
+            fused: 1,
         }
     }
 }
