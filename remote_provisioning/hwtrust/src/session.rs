@@ -29,7 +29,7 @@ pub struct Options {
 }
 
 /// The set of RKP instances associated to the session.
-#[derive(Clone, Copy, Default, Debug, ValueEnum)]
+#[derive(Clone, Copy, Default, Debug, ValueEnum, PartialEq, Eq)]
 pub enum RkpInstance {
     /// The DICE chain is associated to the default instance.
     #[default]
