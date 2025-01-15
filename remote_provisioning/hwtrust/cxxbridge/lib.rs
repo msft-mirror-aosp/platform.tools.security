@@ -4,9 +4,17 @@
 use coset::CborSerializable;
 use hwtrust::dice::ChainForm;
 use hwtrust::dice::DiceMode;
+use hwtrust::dice::ProfileVersion;
 use hwtrust::rkp::Csr as InnerCsr;
-use hwtrust::session::{Options, RkpInstance, Session};
+use hwtrust::session::{DiceProfileRange, Options, RkpInstance, Session};
 use std::str::FromStr;
+
+/// Since the AVF DICE chain combines both vendor and AOSP DICE chains, the chain doesn't rely
+/// solely on the VSR for vendors, unlike pure vendor DICE chains. This constant defines the
+/// minimum profile version required for the AOSP/AVF portion of the DICE chain.
+///
+/// Since the AVF portion follows the vendor portion, its version is always higher.
+const AVF_DICE_PROFILE_VERSION: ProfileVersion = ProfileVersion::Android16;
 
 #[allow(clippy::needless_maybe_sized)]
 #[allow(unsafe_op_in_unsafe_fn)]
@@ -117,20 +125,18 @@ fn verify_dice_chain(
     allow_any_mode: bool,
     instance: &str,
 ) -> ffi::VerifyDiceChainResult {
-    let mut session = Session {
-        options: match kind {
-            ffi::DiceChainKind::Vsr13 => Options::vsr13(),
-            ffi::DiceChainKind::Vsr14 => Options::vsr14(),
-            ffi::DiceChainKind::Vsr15 => Options::vsr15(),
-            ffi::DiceChainKind::Vsr16 => Options::vsr16(),
-            _ => {
-                return ffi::VerifyDiceChainResult {
-                    error: "invalid chain kind".to_string(),
-                    chain: Box::new(DiceChain(None)),
-                    len: 0,
-                }
+    let mut options = match kind {
+        ffi::DiceChainKind::Vsr13 => Options::vsr13(),
+        ffi::DiceChainKind::Vsr14 => Options::vsr14(),
+        ffi::DiceChainKind::Vsr15 => Options::vsr15(),
+        ffi::DiceChainKind::Vsr16 => Options::vsr16(),
+        _ => {
+            return ffi::VerifyDiceChainResult {
+                error: "invalid chain kind".to_string(),
+                chain: Box::new(DiceChain(None)),
+                len: 0,
             }
-        },
+        }
     };
     let Ok(rkp_instance) = RkpInstance::from_str(instance) else {
         return ffi::VerifyDiceChainResult {
@@ -139,6 +145,11 @@ fn verify_dice_chain(
             len: 0,
         };
     };
+    if rkp_instance == RkpInstance::Avf {
+        options.dice_profile_range =
+            DiceProfileRange::new(options.dice_profile_range.start(), AVF_DICE_PROFILE_VERSION)
+    }
+    let mut session = Session { options };
     session.set_allow_any_mode(allow_any_mode);
     session.set_rkp_instance(rkp_instance);
     match ChainForm::from_cbor(&session, chain) {
@@ -251,19 +262,17 @@ fn validate_csr(
     allow_any_mode: bool,
     instance: &str,
 ) -> ffi::ValidateCsrResult {
-    let mut session = Session {
-        options: match kind {
-            ffi::DiceChainKind::Vsr13 => Options::vsr13(),
-            ffi::DiceChainKind::Vsr14 => Options::vsr14(),
-            ffi::DiceChainKind::Vsr15 => Options::vsr15(),
-            ffi::DiceChainKind::Vsr16 => Options::vsr16(),
-            _ => {
-                return ffi::ValidateCsrResult {
-                    error: "invalid chain kind".to_string(),
-                    csr: Box::new(Csr(None)),
-                }
+    let mut options = match kind {
+        ffi::DiceChainKind::Vsr13 => Options::vsr13(),
+        ffi::DiceChainKind::Vsr14 => Options::vsr14(),
+        ffi::DiceChainKind::Vsr15 => Options::vsr15(),
+        ffi::DiceChainKind::Vsr16 => Options::vsr16(),
+        _ => {
+            return ffi::ValidateCsrResult {
+                error: "invalid chain kind".to_string(),
+                csr: Box::new(Csr(None)),
             }
-        },
+        }
     };
     let Ok(rkp_instance) = RkpInstance::from_str(instance) else {
         return ffi::ValidateCsrResult {
@@ -271,6 +280,11 @@ fn validate_csr(
             csr: Box::new(Csr(None)),
         };
     };
+    if rkp_instance == RkpInstance::Avf {
+        options.dice_profile_range =
+            DiceProfileRange::new(options.dice_profile_range.start(), AVF_DICE_PROFILE_VERSION)
+    }
+    let mut session = Session { options };
     session.set_is_factory(is_factory);
     session.set_allow_any_mode(allow_any_mode);
     session.set_rkp_instance(rkp_instance);
