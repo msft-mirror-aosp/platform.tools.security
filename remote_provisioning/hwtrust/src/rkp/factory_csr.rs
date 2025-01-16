@@ -336,4 +336,13 @@ mod tests {
                     .contains("12953f77f0726491a09c5b2d134a26a8a657dbc170c4036ffde81e881e0acd03")
         );
     }
+
+    #[test]
+    fn from_json_v3_p256_with_corrupted_payload() {
+        let json =
+            fs::read_to_string("testdata/factory_csr/v3_p256_with_corrupted_payload.json").unwrap();
+        let err = FactoryCsr::from_json(&Session::default(), &json).unwrap_err();
+        let source = err.source().unwrap().to_string();
+        assert!(source.contains("Signature verification failed"));
+    }
 }
