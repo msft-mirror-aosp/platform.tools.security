@@ -116,8 +116,41 @@ mod ffi {
     }
 }
 
+impl TryInto<Options> for ffi::DiceChainKind {
+    type Error = String;
+
+    fn try_into(self) -> Result<Options, Self::Error> {
+        match self {
+            ffi::DiceChainKind::Vsr13 => Ok(Options::vsr13()),
+            ffi::DiceChainKind::Vsr14 => Ok(Options::vsr14()),
+            ffi::DiceChainKind::Vsr15 => Ok(Options::vsr15()),
+            ffi::DiceChainKind::Vsr16 => Ok(Options::vsr16()),
+            _ => Err("invalid chain kind".to_string()),
+        }
+    }
+}
+
 /// A DICE chain as exposed over the cxx bridge.
 pub struct DiceChain(Option<ChainForm>);
+
+fn new_session(
+    kind: ffi::DiceChainKind,
+    allow_any_mode: bool,
+    instance: &str,
+) -> Result<Session, String> {
+    let mut options: Options = kind.try_into()?;
+    let Ok(rkp_instance) = RkpInstance::from_str(instance) else {
+        return Err(format!("invalid RKP instance: {}", instance));
+    };
+    if rkp_instance == RkpInstance::Avf {
+        options.dice_profile_range =
+            DiceProfileRange::new(options.dice_profile_range.start(), AVF_DICE_PROFILE_VERSION)
+    }
+    let mut session = Session { options };
+    session.set_rkp_instance(rkp_instance);
+    session.set_allow_any_mode(allow_any_mode);
+    Ok(session)
+}
 
 fn verify_dice_chain(
     chain: &[u8],
@@ -125,33 +158,17 @@ fn verify_dice_chain(
     allow_any_mode: bool,
     instance: &str,
 ) -> ffi::VerifyDiceChainResult {
-    let mut options = match kind {
-        ffi::DiceChainKind::Vsr13 => Options::vsr13(),
-        ffi::DiceChainKind::Vsr14 => Options::vsr14(),
-        ffi::DiceChainKind::Vsr15 => Options::vsr15(),
-        ffi::DiceChainKind::Vsr16 => Options::vsr16(),
-        _ => {
+    let session = match new_session(kind, allow_any_mode, instance) {
+        Ok(session) => session,
+        Err(e) => {
             return ffi::VerifyDiceChainResult {
-                error: "invalid chain kind".to_string(),
+                error: e,
                 chain: Box::new(DiceChain(None)),
                 len: 0,
             }
         }
     };
-    let Ok(rkp_instance) = RkpInstance::from_str(instance) else {
-        return ffi::VerifyDiceChainResult {
-            error: format!("invalid RKP instance: {}", instance),
-            chain: Box::new(DiceChain(None)),
-            len: 0,
-        };
-    };
-    if rkp_instance == RkpInstance::Avf {
-        options.dice_profile_range =
-            DiceProfileRange::new(options.dice_profile_range.start(), AVF_DICE_PROFILE_VERSION)
-    }
-    let mut session = Session { options };
-    session.set_allow_any_mode(allow_any_mode);
-    session.set_rkp_instance(rkp_instance);
+
     match ChainForm::from_cbor(&session, chain) {
         Ok(chain) => {
             let len = chain.length();
@@ -262,32 +279,11 @@ fn validate_csr(
     allow_any_mode: bool,
     instance: &str,
 ) -> ffi::ValidateCsrResult {
-    let mut options = match kind {
-        ffi::DiceChainKind::Vsr13 => Options::vsr13(),
-        ffi::DiceChainKind::Vsr14 => Options::vsr14(),
-        ffi::DiceChainKind::Vsr15 => Options::vsr15(),
-        ffi::DiceChainKind::Vsr16 => Options::vsr16(),
-        _ => {
-            return ffi::ValidateCsrResult {
-                error: "invalid chain kind".to_string(),
-                csr: Box::new(Csr(None)),
-            }
-        }
+    let mut session = match new_session(kind, allow_any_mode, instance) {
+        Ok(session) => session,
+        Err(e) => return ffi::ValidateCsrResult { error: e, csr: Box::new(Csr(None)) },
     };
-    let Ok(rkp_instance) = RkpInstance::from_str(instance) else {
-        return ffi::ValidateCsrResult {
-            error: format!("invalid RKP instance: {}", instance),
-            csr: Box::new(Csr(None)),
-        };
-    };
-    if rkp_instance == RkpInstance::Avf {
-        options.dice_profile_range =
-            DiceProfileRange::new(options.dice_profile_range.start(), AVF_DICE_PROFILE_VERSION)
-    }
-    let mut session = Session { options };
     session.set_is_factory(is_factory);
-    session.set_allow_any_mode(allow_any_mode);
-    session.set_rkp_instance(rkp_instance);
     match InnerCsr::from_cbor(&session, csr) {
         Ok(csr) => {
             let csr = Box::new(Csr(Some(csr)));
