@@ -51,6 +51,8 @@ DiceChain::~DiceChain() {}
 DiceChain::DiceChain(std::unique_ptr<BoxedDiceChain> chain, size_t size) noexcept
       : chain_(std::move(chain)), size_(size) {}
 
+DiceChain::DiceChain(DiceChain&& other) : DiceChain(std::move(other.chain_), other.size_) {}
+
 Result<DiceChain> DiceChain::Verify(
   const std::vector<uint8_t>& chain, DiceChain::Kind kind, bool allow_any_mode,
   std::string_view instance) noexcept {
@@ -108,6 +110,8 @@ Csr::~Csr() {}
 
 Csr::Csr(std::unique_ptr<BoxedCsr> csr, DiceChain::Kind kind, std::string_view instance) noexcept
     : mCsr(std::move(csr)), mKind(kind), mInstance(instance.data()) {}
+
+Csr::Csr(Csr&& other) : Csr(std::move(other.mCsr), other.mKind, std::move(other.mInstance)) {}
 
 Result<Csr> Csr::validate(const std::vector<uint8_t>& request, DiceChain::Kind kind, bool isFactory,
     bool allowAnyMode, std::string_view instance) noexcept {

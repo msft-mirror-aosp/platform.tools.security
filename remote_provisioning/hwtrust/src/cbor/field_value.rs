@@ -186,7 +186,7 @@ impl FieldValue {
             .map(|v| {
                 let value =
                     if let Value::Integer(i) = v { i128::from(i).try_into().ok() } else { None };
-                value.ok_or_else(|| FieldValueError::NotU32(self.name, v))
+                value.ok_or(FieldValueError::NotU32(self.name, v))
             })
             .transpose()
     }
@@ -196,7 +196,7 @@ impl FieldValue {
             .map(|v| {
                 let value =
                     if let Value::Integer(i) = v { i128::from(i).try_into().ok() } else { None };
-                value.ok_or_else(|| FieldValueError::NotI64(self.name, v))
+                value.ok_or(FieldValueError::NotI64(self.name, v))
             })
             .transpose()
     }
@@ -210,7 +210,7 @@ impl FieldValue {
             .map(|v| {
                 let value =
                     if let Value::Integer(i) = v { i128::from(i).try_into().ok() } else { None };
-                value.ok_or_else(|| FieldValueError::NotU64(self.name, v))
+                value.ok_or(FieldValueError::NotU64(self.name, v))
             })
             .transpose()
     }
