@@ -31,7 +31,7 @@ public:
     std::string_view instance) noexcept;
 
   ~DiceChain();
-  DiceChain(DiceChain&&) = default;
+  DiceChain(DiceChain&&);
 
   // The root public key (UDS public key) is not included here
   Result<std::vector<std::vector<uint8_t>>> CosePublicKeys() const noexcept;
@@ -60,7 +60,7 @@ public:
     bool allowAnyMode, std::string_view instance) noexcept;
 
   ~Csr();
-  Csr(Csr&&) = default;
+  Csr(Csr&&);
 
   Result<DiceChain> getDiceChain() const noexcept;
 
