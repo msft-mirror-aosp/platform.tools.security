@@ -10,8 +10,10 @@ use std::fmt;
 
 /// The kinds of digital signature keys that are supported.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum SignatureKind {
+pub enum SignatureKind {
+    /// Edwards-curve Digital Signature Algorithm Ed25519.
     Ed25519,
+    /// Elliptic Curve Digital Signature Algorithm (ECDSA).
     Ec(EcKind),
 }
 
@@ -24,8 +26,10 @@ pub(crate) enum KeyAgreementKind {
 
 /// Enumeration of the kinds of elliptic curve keys that are supported.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum EcKind {
+pub enum EcKind {
+    /// P-256 elliptic curve.
     P256,
+    /// P-384 elliptic curve.
     P384,
 }
 
@@ -49,7 +53,8 @@ pub struct KeyAgreementPublicKey {
 }
 
 impl PublicKey {
-    pub(crate) fn kind(&self) -> SignatureKind {
+    /// The signature kind of this key.
+    pub fn kind(&self) -> SignatureKind {
         self.kind
     }
 
