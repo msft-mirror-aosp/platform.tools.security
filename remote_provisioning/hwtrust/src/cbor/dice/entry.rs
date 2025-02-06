@@ -23,6 +23,7 @@ const AUTHORITY_DESC: i64 = -4670550;
 const MODE: i64 = -4670551;
 const SUBJECT_PUBLIC_KEY: i64 = -4670552;
 const KEY_USAGE: i64 = -4670553;
+const PROFILE_NAME: i64 = -4670554;
 
 const CONFIG_DESC_RESERVED_MAX: i64 = -70000;
 const CONFIG_DESC_RESERVED_MIN: i64 = -70999;
@@ -104,6 +105,7 @@ impl PayloadFields {
         let mut authority_desc = FieldValue::new("authority desc");
         let mut authority_hash = FieldValue::new("authority hash");
         let mut key_usage = FieldValue::new("key usage");
+        let mut profile_name = FieldValue::new("profile name");
 
         let entries = cbor_map_from_slice(bytes)?;
         for (key, value) in entries.into_iter() {
@@ -120,6 +122,7 @@ impl PayloadFields {
                     AUTHORITY_DESC => &mut authority_desc,
                     AUTHORITY_HASH => &mut authority_hash,
                     KEY_USAGE => &mut key_usage,
+                    PROFILE_NAME => &mut profile_name,
                     _ => bail!("Unknown key {}", key),
                 };
                 match field.get() {
