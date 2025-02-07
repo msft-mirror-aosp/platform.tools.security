@@ -264,7 +264,7 @@ pub struct ConfigDesc {
     resettable: bool,
     security_version: Option<u64>,
     rkp_vm_marker: bool,
-    extensions: Vec<(String, String)>,
+    extensions: Vec<(i64, Vec<u8>)>,
 }
 
 impl ConfigDesc {
@@ -299,7 +299,7 @@ impl ConfigDesc {
     }
 
     /// Return any extensions present in the descriptor.
-    pub fn extensions(&self) -> &[(String, String)] {
+    pub fn extensions(&self) -> &[(i64, Vec<u8>)] {
         &self.extensions
     }
 }
@@ -325,7 +325,7 @@ impl Display for ConfigDesc {
             writeln!(f, "RKP VM Marker")?;
         }
         for (key, value) in &self.extensions {
-            writeln!(f, "{key}: {value}")?;
+            writeln!(f, "{key}: {value:?}")?;
         }
         Ok(())
     }
@@ -388,7 +388,7 @@ impl ConfigDescBuilder {
 
     /// Sets the extension key/value pairs.
     #[must_use]
-    pub fn extensions(mut self, extensions: Vec<(String, String)>) -> Self {
+    pub fn extensions(mut self, extensions: Vec<(i64, Vec<u8>)>) -> Self {
         self.0.extensions = extensions;
         self
     }
