@@ -12,6 +12,8 @@ pub use device_info::{
     DeviceInfoVersion,
 };
 
-pub(crate) use protected_data::{ProtectedData, UdsCerts, UdsCertsEntry};
+pub(crate) use protected_data::{UdsCerts, UdsCertsEntry};
+
+pub use protected_data::ProtectedData;
 
 pub use factory_csr::FactoryCsr;
