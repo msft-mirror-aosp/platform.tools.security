@@ -58,7 +58,8 @@ impl PublicKey {
         self.kind
     }
 
-    pub(crate) fn pkey(&self) -> &PKeyRef<Public> {
+    /// Reference to the underlying public key.
+    pub fn pkey(&self) -> &PKeyRef<Public> {
         &self.pkey.0
     }
 
