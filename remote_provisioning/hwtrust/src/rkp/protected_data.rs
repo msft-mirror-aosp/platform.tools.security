@@ -4,6 +4,7 @@ use std::{collections::HashMap, fmt};
 
 use crate::dice::ChainForm;
 
+/// The CSR V2 payload that is encrypted with an Endpoint Encryption Key (EEK).
 #[derive(Clone, Eq, PartialEq)]
 pub struct ProtectedData {
     mac_key: Vec<u8>,
@@ -23,14 +24,17 @@ pub enum UdsCertsEntry {
 }
 
 impl ProtectedData {
+    /// Constructs a new `ProtectedData` with a MAC key, DICE chain, and optional UDS certificates.
     pub fn new(mac_key: Vec<u8>, dice_chain: ChainForm, uds_certs: Option<UdsCerts>) -> Self {
         Self { mac_key, dice_chain, uds_certs }
     }
 
+    /// Returns the DICE chain.
     pub fn dice_chain(&self) -> ChainForm {
         self.dice_chain.clone()
     }
 
+    /// Returns the UDS certificates.
     pub fn uds_certs(&self) -> Option<UdsCerts> {
         self.uds_certs.clone()
     }
