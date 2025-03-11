@@ -9,6 +9,8 @@ FAILURE_PREFIX = 'Failure: '
 FINISHED_TAG = 'AttestationFinished'
 INFO_TAG = 'AttestationFailInfo'
 INFO_PREFIX = ' ' * len(FAILURE_PREFIX)
+ATTESTATION_PRINT_TAG = 'AttestationPrint'
+ATTESTATION_PRINT_PREFIX = 'Printed Attestation: '
 devnull = open(os.devnull, 'wb')
 
 # Clear logcat
@@ -23,7 +25,9 @@ while not finished and read_retry < 5:
     time.sleep(1)
     logcat = subprocess.check_output(['adb', 'logcat', '-d'], stderr=subprocess.STDOUT)
     for line in logcat.decode('utf-8').split('\n'):
-        if INFO_TAG in line:
+        if ATTESTATION_PRINT_TAG in line:
+            print(ATTESTATION_PRINT_PREFIX + line[line.index('AttestationPrint') + len('AttestationPrint:'):])
+        elif INFO_TAG in line:
             print(INFO_PREFIX + line[line.index('AttestationFailInfo') + len('AttestationFailInfo:'):])
         elif FAILURE_TAG in line:
             failures += 1
