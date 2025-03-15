@@ -29,6 +29,7 @@ import org.bouncycastle.asn1.ASN1Primitive;
 import org.bouncycastle.asn1.ASN1Sequence;
 import org.bouncycastle.asn1.ASN1SequenceParser;
 import org.bouncycastle.asn1.ASN1TaggedObject;
+import org.bouncycastle.util.encoders.Hex;
 
 import java.io.IOException;
 import java.security.cert.CertificateParsingException;
@@ -123,6 +124,7 @@ public class AuthorizationList {
     private static final int KM_TAG_ATTESTATION_APPLICATION_ID = KM_BYTES | 709;
     private static final int KM_TAG_VENDOR_PATCHLEVEL = KM_UINT | 718;
     private static final int KM_TAG_BOOT_PATCHLEVEL = KM_UINT | 719;
+    private static final int KM_TAG_MODULE_HASH = KM_BYTES | 724;
 
     // Map for converting padding values to strings
     private static final ImmutableMap<Integer, String> paddingMap = ImmutableMap
@@ -180,6 +182,7 @@ public class AuthorizationList {
     private Integer vendorPatchLevel;
     private Integer bootPatchLevel;
     private AttestationApplicationId attestationApplicationId;
+    private byte[] moduleHash;
 
     public AuthorizationList(ASN1Encodable sequence) throws CertificateParsingException {
         if (!(sequence instanceof ASN1Sequence)) {
@@ -278,6 +281,9 @@ public class AuthorizationList {
                     break;
                 case KM_TAG_ALL_APPLICATIONS & KEYMASTER_TAG_TYPE_MASK:
                     allApplications = true;
+                    break;
+                case KM_TAG_MODULE_HASH & KEYMASTER_TAG_TYPE_MASK:
+                    moduleHash = Asn1Utils.getByteArrayFromAsn1(value);
                     break;
             }
         }
@@ -512,6 +518,10 @@ public class AuthorizationList {
         return attestationApplicationId;
     }
 
+    public byte[] getModuleHash() {
+        return moduleHash.clone();
+    }
+
     @Override
     public String toString() {
         StringBuilder s = new StringBuilder();
@@ -602,7 +612,11 @@ public class AuthorizationList {
         }
 
         if (attestationApplicationId != null) {
-            s.append("\nApplication ID:").append(attestationApplicationId.toString());
+            s.append("\nAttestation Application ID:").append(attestationApplicationId.toString());
+        }
+
+        if (moduleHash != null) {
+            s.append("\nModule Hash: ").append(Hex.toHexString(moduleHash));
         }
 
         return s.toString();

@@ -169,6 +169,8 @@ public class AttestationTest extends AsyncTask<Void, String, Void> {
         }
 
         Attestation attestation = new Attestation(attestationCert);
+        Utils.logAttestation(attestation.toString());
+
         if (!Arrays.equals(attestation.getAttestationChallenge(), challenge)) {
             Utils.logError("challenge mismatch\nExpected:",
                     challenge, attestation.getAttestationChallenge());
