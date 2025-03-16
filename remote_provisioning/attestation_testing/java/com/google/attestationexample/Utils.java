@@ -7,6 +7,7 @@ import java.util.Arrays;
 public class Utils {
     public static final String FAIL = "AttestationFail";
     public static final String FAIL_INFO = "AttestationFailInfo";
+    public static final String ATTESTATION_PRINT = "AttestationPrint";
 
     public static void logError(String message, int expected, int actual) {
         Log.e(FAIL, message);
@@ -18,5 +19,9 @@ public class Utils {
         Log.e(FAIL, message);
         Log.e(FAIL_INFO, "Expected: " + Arrays.toString(expected));
         Log.e(FAIL_INFO, "Actual: " + Arrays.toString(actual));
+    }
+
+    public static void logAttestation(String attestation) {
+        Log.i(ATTESTATION_PRINT, attestation + "\n");
     }
 }
