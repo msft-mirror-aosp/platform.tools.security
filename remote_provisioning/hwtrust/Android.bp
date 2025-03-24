@@ -43,6 +43,7 @@ rust_library {
         "com.android.compos",
         "com.android.virt",
     ],
+    min_sdk_version: "35",
 }
 
 rust_test {
