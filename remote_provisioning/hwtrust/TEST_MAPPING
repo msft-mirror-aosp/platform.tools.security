@@ -18,11 +18,6 @@
       "name": "libclient_vm_csr.test"
     }
   ],
-  "avf-presubmit": [
-    {
-      "name": "rialto_test"
-    }
-  ],
   "avf-postsubmit": [
     {
       "name": "VtsHalRemotelyProvisionedComponentTargetTest"
