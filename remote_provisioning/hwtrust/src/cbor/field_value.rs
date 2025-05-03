@@ -64,7 +64,7 @@ impl FieldValue {
     }
 
     pub fn is_bytes(&self) -> bool {
-        self.value.as_ref().map_or(false, |v| v.is_bytes())
+        self.value.as_ref().is_some_and(|v| v.is_bytes())
     }
 
     pub fn into_optional_bytes(self) -> Result<Option<Vec<u8>>, FieldValueError> {
@@ -174,7 +174,7 @@ impl FieldValue {
     }
 
     pub fn is_integer(&self) -> bool {
-        self.value.as_ref().map_or(false, |v| v.is_integer())
+        self.value.as_ref().is_some_and(|v| v.is_integer())
     }
 
     pub fn into_u32(self) -> Result<u32, FieldValueError> {
