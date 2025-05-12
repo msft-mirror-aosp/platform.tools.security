@@ -38,7 +38,6 @@ cc_fuzz {
           "libcutils",
           "libEGL",
           "libGLESv2",
-          "libheif",
           "libvulkan",
           "libnativewindow",
       ],
