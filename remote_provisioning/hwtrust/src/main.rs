@@ -4,6 +4,7 @@ use anyhow::{bail, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use hwtrust::dice;
 use hwtrust::dice::ChainForm;
+use hwtrust::log_verbose;
 use hwtrust::rkp;
 use hwtrust::session::{Options, RkpInstance, Session};
 use std::io::BufRead;
@@ -99,27 +100,31 @@ enum VsrVersion {
     Vsr16,
 }
 
-fn session_from_vsr(vsr: Option<VsrVersion>) -> Session {
-    Session {
-        options: match vsr {
-            Some(VsrVersion::Vsr13) => Options::vsr13(),
-            Some(VsrVersion::Vsr14) => Options::vsr14(),
-            Some(VsrVersion::Vsr15) => Options::vsr15(),
-            Some(VsrVersion::Vsr16) => {
-                println!();
-                println!();
-                println!("  ********************************************************************");
-                println!("  ! The selected VSR is not finalized and is subject to change.      !");
-                println!("  ! Please contact your TAM if you intend to depend on the           !");
-                println!("  ! validation rules use for the selected VSR.                       !");
-                println!("  ********************************************************************");
-                println!();
-                println!();
-                Options::vsr16()
-            }
-            None => Options::default(),
-        },
-    }
+fn session_from_args<F>(args: &Args, set_options: F) -> Session
+where
+    F: Fn(&mut Options),
+{
+    let mut options = match args.vsr {
+        Some(VsrVersion::Vsr13) => Options::vsr13(),
+        Some(VsrVersion::Vsr14) => Options::vsr14(),
+        Some(VsrVersion::Vsr15) => Options::vsr15(),
+        Some(VsrVersion::Vsr16) => {
+            println!();
+            println!();
+            println!("  ********************************************************************");
+            println!("  ! The selected VSR is not finalized and is subject to change.      !");
+            println!("  ! Please contact your TAM if you intend to depend on the           !");
+            println!("  ! validation rules use for the selected VSR.                       !");
+            println!("  ********************************************************************");
+            println!();
+            println!();
+            Options::vsr16()
+        }
+        None => Options::default(),
+    };
+    options.verbose = args.verbose;
+    set_options(&mut options);
+    Session { options }
 }
 
 fn main() -> Result<()> {
@@ -142,13 +147,12 @@ fn main() -> Result<()> {
 }
 
 fn verify_dice_chain(args: &Args, sub_args: &DiceChainArgs) -> Result<Option<String>> {
-    let mut session = session_from_vsr(args.vsr);
-    session.set_allow_any_mode(sub_args.allow_any_mode);
-    session.set_rkp_instance(sub_args.rkp_instance);
+    let session = session_from_args(args, |o| {
+        o.allow_any_mode = sub_args.allow_any_mode;
+        o.rkp_instance = sub_args.rkp_instance;
+    });
     let chain = dice::ChainForm::from_cbor(&session, &fs::read(&sub_args.chain)?)?;
-    if args.verbose {
-        println!("{chain:#?}");
-    }
+    log_verbose!(session, "{chain:#?}");
     if let ChainForm::Degenerate(_) = chain {
         return Ok(Some(String::from(
             "WARNING!
@@ -160,8 +164,7 @@ favor of full DICE chains, rooted in ROM, that measure the system's boot compone
 }
 
 fn parse_factory_csr(args: &Args, sub_args: &FactoryCsrArgs) -> Result<Option<String>> {
-    let mut session = session_from_vsr(args.vsr);
-    session.set_allow_any_mode(sub_args.allow_any_mode);
+    let session = session_from_args(args, |o| o.allow_any_mode = sub_args.allow_any_mode);
     let input = &fs::File::open(&sub_args.csr_file)?;
     let mut csr_count = 0;
     for line in io::BufReader::new(input).lines() {
@@ -171,9 +174,7 @@ fn parse_factory_csr(args: &Args, sub_args: &FactoryCsrArgs) -> Result<Option<St
         }
         let csr = rkp::FactoryCsr::from_json(&session, &line)?;
         csr_count += 1;
-        if args.verbose {
-            println!("{csr_count}: {csr:#?}");
-        }
+        log_verbose!(session, "{csr_count}: {csr:#?}");
     }
     if csr_count == 0 {
         bail!("No CSRs found in the input file '{}'", sub_args.csr_file);
@@ -182,14 +183,13 @@ fn parse_factory_csr(args: &Args, sub_args: &FactoryCsrArgs) -> Result<Option<St
 }
 
 fn parse_csr(args: &Args, sub_args: &CsrArgs) -> Result<Option<String>> {
-    let mut session = session_from_vsr(args.vsr);
-    session.set_allow_any_mode(sub_args.allow_any_mode);
-    session.set_rkp_instance(sub_args.rkp_instance);
+    let session = session_from_args(args, |o| {
+        o.allow_any_mode = sub_args.allow_any_mode;
+        o.rkp_instance = sub_args.rkp_instance;
+    });
     let input = &fs::File::open(&sub_args.csr_file)?;
     let csr = rkp::Csr::from_cbor(&session, input)?;
-    if args.verbose {
-        print!("{csr:#?}");
-    }
+    log_verbose!(session, "{csr:#?}");
     Ok(None)
 }
 

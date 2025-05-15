@@ -391,9 +391,13 @@ mod tests {
     #[test]
     fn from_cbor_valid_v3_avf_with_rkpvm_chain() -> anyhow::Result<()> {
         let input = fs::read("testdata/csr/v3_csr_avf.cbor")?;
-        let mut session = Session::default();
-        session.set_allow_any_mode(true);
-        session.set_rkp_instance(RkpInstance::Avf);
+        let session = Session {
+            options: Options {
+                allow_any_mode: true,
+                rkp_instance: RkpInstance::Avf,
+                ..Options::default()
+            },
+        };
         let csr = Csr::from_cbor(&session, input.as_slice())?;
         let Csr::V3 { dice_chain, csr_payload, .. } = csr else {
             panic!("Parsed CSR was not V3: {:?}", csr);
