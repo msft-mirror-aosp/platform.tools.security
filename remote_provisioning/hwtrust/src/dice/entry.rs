@@ -1,3 +1,4 @@
+use crate::debug_option;
 use crate::publickey::PublicKey;
 use std::fmt::{self, Display, Formatter};
 use thiserror::Error;
@@ -237,7 +238,7 @@ impl PayloadBuilder {
 }
 
 /// Version of the component from the configuration descriptor.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum ComponentVersion {
     /// An integer component version number.
     Integer(i64),
@@ -249,14 +250,20 @@ impl Display for ComponentVersion {
     fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
         match self {
             ComponentVersion::Integer(n) => write!(f, "{n}")?,
-            ComponentVersion::String(s) => write!(f, "{s}")?,
+            ComponentVersion::String(s) => write!(f, "\"{s}\"")?,
         }
         Ok(())
     }
 }
 
+impl fmt::Debug for ComponentVersion {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
+        write!(f, "{self}")
+    }
+}
+
 /// Fields from the configuration descriptor.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Default, Clone, PartialEq, Eq)]
 pub struct ConfigDesc {
     component_name: Option<String>,
     component_instance_name: Option<String>,
@@ -328,6 +335,22 @@ impl Display for ConfigDesc {
             writeln!(f, "{key}: {value:?}")?;
         }
         Ok(())
+    }
+}
+
+impl fmt::Debug for ConfigDesc {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
+        let mut debug = f.debug_struct("ConfigDesc");
+        debug.field("component_name", debug_option(&self.component_name));
+        debug.field("component_instance_name", debug_option(&self.component_instance_name));
+        debug.field("component_version", debug_option(&self.component_version));
+        debug.field("resettable", &self.resettable);
+        debug.field("security_version", &self.security_version);
+        debug.field("rkp_vm_marker", &self.rkp_vm_marker);
+        for (key, value) in &self.extensions {
+            debug.field(&format!("[ext] {key}"), &hex::encode(value));
+        }
+        debug.finish()
     }
 }
 
