@@ -3,6 +3,7 @@ use super::{cose_key_from_cbor_value, KeyOpsType};
 use crate::cbor::dice::entry::PayloadFields;
 use crate::cbor::value_from_bytes;
 use crate::dice::{Chain, ChainForm, DegenerateChain, Payload, ProfileVersion};
+use crate::log_verbose;
 use crate::publickey::PublicKey;
 use crate::session::Session;
 use anyhow::{bail, Context, Result};
@@ -78,6 +79,7 @@ impl Chain {
     ) -> Result<Self> {
         let mut payloads = Vec::with_capacity(values.len());
         let mut previous_public_key = &root;
+        log_verbose!(session, "Received DICE chain with {} entries", values.len());
         for (n, value) in values.enumerate() {
             let entry = Entry::verify_cbor_value(value, previous_public_key)
                 .with_context(|| format!("Invalid entry at index {}", n))?;
@@ -92,6 +94,7 @@ impl Chain {
             };
             let payload = Payload::from_cbor(session, entry.payload(), config_format, is_root)
                 .with_context(|| format!("Invalid payload at index {}", n))?;
+            log_verbose!(session, "Entry {n}: {payload:?}");
             payloads.push(payload);
             let previous = payloads.last().unwrap();
             previous_public_key = previous.subject_public_key();

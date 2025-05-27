@@ -8,3 +8,10 @@ pub mod session;
 
 mod cbor;
 mod eek;
+
+pub(crate) fn debug_option<T: std::fmt::Debug>(option: &Option<T>) -> &dyn std::fmt::Debug {
+    match option {
+        Some(x) => x,
+        n => n,
+    }
+}
