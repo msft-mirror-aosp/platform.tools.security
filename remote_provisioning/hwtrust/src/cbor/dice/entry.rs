@@ -710,11 +710,11 @@ mod tests {
     fn mode_not_configured() {
         let mut fields = valid_payload_fields();
         fields.insert(MODE, Value::Bytes(vec![0]));
-        let mut session = Session { options: Options::default() };
+        let session = Session { options: Options::default() };
         let serialized_fields = serialize_fields(fields);
         Payload::from_cbor(&session, &serialized_fields, ConfigFormat::Android, !IS_ROOT)
             .unwrap_err();
-        session.set_allow_any_mode(true);
+        let session = Session { options: Options { allow_any_mode: true, ..Options::default() } };
         let payload =
             Payload::from_cbor(&session, &serialized_fields, ConfigFormat::Android, !IS_ROOT)
                 .unwrap();
@@ -777,11 +777,11 @@ mod tests {
     fn mode_debug() {
         let mut fields = valid_payload_fields();
         fields.insert(MODE, Value::Bytes(vec![2]));
-        let mut session = Session { options: Options::default() };
+        let session = Session { options: Options::default() };
         let serialized_fields = serialize_fields(fields);
         Payload::from_cbor(&session, &serialized_fields, ConfigFormat::Android, !IS_ROOT)
             .unwrap_err();
-        session.set_allow_any_mode(true);
+        let session = Session { options: Options { allow_any_mode: true, ..Options::default() } };
         let payload =
             Payload::from_cbor(&session, &serialized_fields, ConfigFormat::Android, !IS_ROOT)
                 .unwrap();
@@ -813,11 +813,11 @@ mod tests {
     fn mode_recovery() {
         let mut fields = valid_payload_fields();
         fields.insert(MODE, Value::Bytes(vec![3]));
-        let mut session = Session { options: Options::default() };
+        let session = Session { options: Options::default() };
         let serialized_fields = serialize_fields(fields);
         Payload::from_cbor(&session, &serialized_fields, ConfigFormat::Android, !IS_ROOT)
             .unwrap_err();
-        session.set_allow_any_mode(true);
+        let session = Session { options: Options { allow_any_mode: true, ..Options::default() } };
         let payload =
             Payload::from_cbor(&session, &serialized_fields, ConfigFormat::Android, !IS_ROOT)
                 .unwrap();
@@ -837,8 +837,7 @@ mod tests {
     fn mode_invalid_becomes_not_configured() {
         let mut fields = valid_payload_fields();
         fields.insert(MODE, Value::Bytes(vec![4]));
-        let mut session = Session { options: Options::default() };
-        session.set_allow_any_mode(true);
+        let session = Session { options: Options { allow_any_mode: true, ..Options::default() } };
         let payload = Payload::from_cbor(
             &session,
             &serialize_fields(fields),

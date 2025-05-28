@@ -59,17 +59,17 @@ impl FromStr for RkpInstance {
     }
 }
 
+/// Wrapper for Session.log_verbose with inline format string support.
+#[macro_export]
+macro_rules! log_verbose {
+    ($session:ident, $($arg:tt)*) => {
+        if $session.options.verbose {
+            println!($($arg)*);
+        }
+    };
+}
+
 impl Session {
-    /// Set is_factory
-    pub fn set_is_factory(&mut self, is_factory: bool) {
-        self.options.is_factory = is_factory;
-    }
-
-    /// Set allow_any_mode.
-    pub fn set_allow_any_mode(&mut self, allow_any_mode: bool) {
-        self.options.allow_any_mode = allow_any_mode
-    }
-
     /// Sets the RKP instance associated to the session.
     pub fn set_rkp_instance(&mut self, rkp_instance: RkpInstance) {
         self.options.rkp_instance = rkp_instance
