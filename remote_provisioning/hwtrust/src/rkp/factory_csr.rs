@@ -54,6 +54,7 @@ mod tests {
     use crate::rkp::device_info::DeviceInfoVersion;
     use crate::rkp::factory_csr::FactoryCsr;
     use crate::rkp::{ProtectedData, UdsCerts, UdsCertsEntry};
+    use crate::session::Options;
     use anyhow::anyhow;
     use itertools::Itertools;
     use openssl::{pkey::PKey, x509::X509};
@@ -318,8 +319,7 @@ mod tests {
     fn from_json_valid_v3_avf_with_rkpvm_markers() {
         let json = fs::read_to_string("testdata/factory_csr/v3_avf_valid_with_rkpvm_markers.json")
             .unwrap();
-        let mut session = Session::default();
-        session.set_allow_any_mode(true);
+        let session = Session { options: Options { allow_any_mode: true, ..Options::default() } };
         let csr = FactoryCsr::from_json(&session, &json).unwrap();
         assert_eq!(csr.name, "avf");
     }

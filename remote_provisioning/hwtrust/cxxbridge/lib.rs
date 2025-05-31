@@ -133,11 +133,14 @@ impl TryInto<Options> for ffi::DiceChainKind {
 /// A DICE chain as exposed over the cxx bridge.
 pub struct DiceChain(Option<ChainForm>);
 
-fn new_session(
+fn new_session<F>(
     kind: ffi::DiceChainKind,
-    allow_any_mode: bool,
     instance: &str,
-) -> Result<Session, String> {
+    set_options: F,
+) -> Result<Session, String>
+where
+    F: Fn(&mut Options),
+{
     let mut options: Options = kind.try_into()?;
     let Ok(rkp_instance) = RkpInstance::from_str(instance) else {
         return Err(format!("invalid RKP instance: {}", instance));
@@ -146,10 +149,9 @@ fn new_session(
         options.dice_profile_range =
             DiceProfileRange::new(options.dice_profile_range.start(), AVF_DICE_PROFILE_VERSION)
     }
-    let mut session = Session { options };
-    session.set_rkp_instance(rkp_instance);
-    session.set_allow_any_mode(allow_any_mode);
-    Ok(session)
+    options.rkp_instance = rkp_instance;
+    set_options(&mut options);
+    Ok(Session { options })
 }
 
 fn verify_dice_chain(
@@ -158,7 +160,7 @@ fn verify_dice_chain(
     allow_any_mode: bool,
     instance: &str,
 ) -> ffi::VerifyDiceChainResult {
-    let session = match new_session(kind, allow_any_mode, instance) {
+    let session = match new_session(kind, instance, |o| o.allow_any_mode = allow_any_mode) {
         Ok(session) => session,
         Err(e) => {
             return ffi::VerifyDiceChainResult {
@@ -279,11 +281,13 @@ fn validate_csr(
     allow_any_mode: bool,
     instance: &str,
 ) -> ffi::ValidateCsrResult {
-    let mut session = match new_session(kind, allow_any_mode, instance) {
+    let session = match new_session(kind, instance, |o| {
+        o.allow_any_mode = allow_any_mode;
+        o.is_factory = is_factory;
+    }) {
         Ok(session) => session,
         Err(e) => return ffi::ValidateCsrResult { error: e, csr: Box::new(Csr(None)) },
     };
-    session.set_is_factory(is_factory);
     match InnerCsr::from_cbor(&session, csr) {
         Ok(csr) => {
             let csr = Box::new(Csr(Some(csr)));
