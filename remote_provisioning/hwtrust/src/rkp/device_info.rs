@@ -1,3 +1,4 @@
+use crate::debug_option;
 use anyhow::anyhow;
 use hex;
 use std::fmt;
@@ -10,31 +11,31 @@ pub struct DeviceInfo {
     /// Version of this data structure. Currently, this is the same as the HAL version.
     pub version: DeviceInfoVersion,
     /// The device's marketed brand.
-    pub brand: String,
+    pub brand: Option<String>,
     /// The device maker.
-    pub manufacturer: String,
+    pub manufacturer: Option<String>,
     /// A variant of a device. Multiple products may be built off the same device.
-    pub product: String,
+    pub product: Option<String>,
     /// End-user-visible name of the product.
-    pub model: String,
+    pub model: Option<String>,
     /// The high-level industrial design. What makes up a "device" is generally hardware
     /// characteristics like form factor, cpu, etc. Multiple products/models may be shipped on
     /// the same underlying device.
-    pub device: String,
+    pub device: Option<String>,
     /// Verified boot state.
-    pub vb_state: DeviceInfoVbState,
+    pub vb_state: Option<DeviceInfoVbState>,
     /// Whether the bootloader is locked or not.
-    pub bootloader_state: DeviceInfoBootloaderState,
+    pub bootloader_state: Option<DeviceInfoBootloaderState>,
     /// Digest of the verified boot metadata structures.
-    pub vbmeta_digest: Vec<u8>,
+    pub vbmeta_digest: Option<Vec<u8>>,
     /// Partner-defined operating system version.
     pub os_version: Option<String>,
     /// Patch level of the system partition.
-    pub system_patch_level: u32,
+    pub system_patch_level: Option<u32>,
     /// Patch level of the kernel.
-    pub boot_patch_level: u32,
+    pub boot_patch_level: Option<u32>,
     /// Patch level of the vendor partition.
-    pub vendor_patch_level: u32,
+    pub vendor_patch_level: Option<u32>,
     /// If backed by KeyMint, this is the security level of the HAL.
     pub security_level: DeviceInfoSecurityLevel,
     /// Whether secure boot is enforced/required by the SoC.
@@ -47,18 +48,18 @@ impl fmt::Debug for DeviceInfo {
 
         fmt.debug_struct("DeviceInfo")
             .field("version", &self.version)
-            .field("brand", &self.brand)
-            .field("manufacturer", &self.manufacturer)
-            .field("product", &self.product)
-            .field("model", &self.model)
-            .field("device", &self.device)
-            .field("vb_state", &self.vb_state)
-            .field("bootloader_state", &self.bootloader_state)
-            .field("vbmeta_digest", &hex::encode(&self.vbmeta_digest))
+            .field("brand", debug_option(&self.brand))
+            .field("manufacturer", debug_option(&self.manufacturer))
+            .field("product", debug_option(&self.product))
+            .field("model", debug_option(&self.model))
+            .field("device", debug_option(&self.device))
+            .field("vb_state", debug_option(&self.vb_state))
+            .field("bootloader_state", debug_option(&self.bootloader_state))
+            .field("vbmeta_digest", debug_option(&self.vbmeta_digest.as_ref().map(hex::encode)))
             .field("os_version", os_version)
-            .field("system_patch_level", &self.system_patch_level)
-            .field("boot_patch_level", &self.boot_patch_level)
-            .field("vendor_patch_level", &self.vendor_patch_level)
+            .field("system_patch_level", debug_option(&self.system_patch_level))
+            .field("boot_patch_level", debug_option(&self.boot_patch_level))
+            .field("vendor_patch_level", debug_option(&self.vendor_patch_level))
             .field("security_level", &self.security_level)
             .field("fused", &self.fused)
             .finish()
@@ -120,11 +121,13 @@ impl TryFrom<&str> for DeviceInfoVbState {
     }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd)]
 /// The version of the DeviceInfo structure, which may update with HAL changes.
 /// Currently, this is the same as the HAL version.
 pub enum DeviceInfoVersion {
-    /// First supported version. Prior to this (V1), almost all fields were optional.
+    /// First supported version.
+    V1,
+    /// Prior to this, almost all fields were optional.
     V2,
     /// Explicit version removed from the CBOR. Otherwise, identical to V2.
     V3,
@@ -135,6 +138,7 @@ impl TryFrom<u32> for DeviceInfoVersion {
 
     fn try_from(i: u32) -> Result<Self, Self::Error> {
         match i {
+            1 => Ok(Self::V1),
             2 => Ok(Self::V2),
             3 => Ok(Self::V3),
             _ => Err(anyhow!("Invalid DeviceInfo version: `{i}`")),
@@ -198,7 +202,7 @@ mod tests {
 
     #[test]
     fn version_from_int() {
-        DeviceInfoVersion::try_from(1).unwrap_err();
+        assert_eq!(DeviceInfoVersion::try_from(1).unwrap(), DeviceInfoVersion::V1);
         assert_eq!(DeviceInfoVersion::try_from(2).unwrap(), DeviceInfoVersion::V2);
         assert_eq!(DeviceInfoVersion::try_from(3).unwrap(), DeviceInfoVersion::V3);
         DeviceInfoVersion::try_from(4).unwrap_err();

@@ -4,7 +4,7 @@ use crate::cbor::field_value::FieldValue;
 use crate::cbor::{canonicalize_map, serialize, value_from_bytes};
 use crate::dice::ChainForm;
 use crate::rkp::{Csr, CsrPayload, DeviceInfo, DeviceInfoVersion, KeysToSign, ProtectedData};
-use crate::session::{RkpInstance, Session};
+use crate::session::{DeviceInfoRange, RkpInstance, Session};
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use base64::{prelude::BASE64_STANDARD, Engine};
 use ciborium::value::Value;
@@ -65,9 +65,13 @@ impl CsrPayload {
             ),
         }
 
+        ensure!(
+            session.options.device_info_range.contains(DeviceInfoVersion::V3),
+            "CSR V3 only supports DeviceInfoVersion V3"
+        );
         let device_info = DeviceInfo::from_cbor_values(
             device_info.into_map()?,
-            Some(DeviceInfoVersion::V3),
+            &DeviceInfoRange::single(DeviceInfoVersion::V3),
             session.options.is_factory,
         )?;
         let keys_to_sign = KeysToSign::from_value(keys_to_sign)?;
@@ -147,10 +151,23 @@ impl Csr {
             _ => unreachable!("verified device info is always a map"),
         };
 
+        let mut device_info_range = session.options.device_info_range.clone();
+
+        // CSR V2 only supports DeviceInfoVersion V1 and DeviceInfoVersion V2; therefore, trim the
+        // range (of expected versions) to V2 and below. The actual version is checked against the
+        // range in DeviceInfo::from_cbor_values.
+        if device_info_range.end() > DeviceInfoVersion::V2 {
+            device_info_range =
+                DeviceInfoRange::new(device_info_range.start(), DeviceInfoVersion::V2);
+        }
+        if device_info_range.start() > DeviceInfoVersion::V2 {
+            bail!("CSR V2 only supports DeviceInfoVersion V1 and V2");
+        }
+
         Ok(Self::V2 {
             device_info: DeviceInfo::from_cbor_values(
                 verified_device_info,
-                None, // version must be determined by "version" in DeviceInfo
+                &device_info_range,
                 session.options.is_factory,
             )?,
             challenge,
@@ -323,7 +340,8 @@ mod tests {
     #[test]
     fn from_base64_valid_v2() {
         let input = fs::read_to_string("testdata/csr/v2_csr.base64").unwrap().trim().to_owned();
-        let csr = Csr::from_base64_cbor(&Session::default(), &input).unwrap();
+        let session = Session { options: Options::vsr13() };
+        let csr = Csr::from_base64_cbor(&session, &input).unwrap();
 
         let device_info = testutil::test_device_info(DeviceInfoVersion::V2);
         let challenge =
@@ -548,18 +566,20 @@ pub(crate) mod testutil {
     pub fn test_device_info(version: DeviceInfoVersion) -> DeviceInfo {
         DeviceInfo {
             version,
-            brand: "Google".to_string(),
-            manufacturer: "Google".to_string(),
-            product: "pixel".to_string(),
-            model: "model".to_string(),
-            device: "device".to_string(),
-            vb_state: DeviceInfoVbState::Green,
-            bootloader_state: DeviceInfoBootloaderState::Locked,
-            vbmeta_digest: b"\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff".to_vec(),
+            brand: Some("Google".to_string()),
+            manufacturer: Some("Google".to_string()),
+            product: Some("pixel".to_string()),
+            model: Some("model".to_string()),
+            device: Some("device".to_string()),
+            vb_state: Some(DeviceInfoVbState::Green),
+            bootloader_state: Some(DeviceInfoBootloaderState::Locked),
+            vbmeta_digest: Some(
+                b"\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff".to_vec(),
+            ),
             os_version: Some("12".to_string()),
-            system_patch_level: 20221025,
-            boot_patch_level: 20221026,
-            vendor_patch_level: 20221027,
+            system_patch_level: Some(20221025),
+            boot_patch_level: Some(20221026),
+            vendor_patch_level: Some(20221027),
             security_level: DeviceInfoSecurityLevel::Tee,
             fused: 1,
         }
