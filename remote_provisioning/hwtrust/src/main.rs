@@ -90,6 +90,8 @@ struct CsrArgs {
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 enum VsrVersion {
+    /// VSR 12 / Android S / 2021
+    Vsr12,
     /// VSR 13 / Android T / 2022
     Vsr13,
     /// VSR 14 / Android U / 2023
@@ -105,6 +107,7 @@ where
     F: Fn(&mut Options),
 {
     let mut options = match args.vsr {
+        Some(VsrVersion::Vsr12) => Options::vsr12(),
         Some(VsrVersion::Vsr13) => Options::vsr13(),
         Some(VsrVersion::Vsr14) => Options::vsr14(),
         Some(VsrVersion::Vsr15) => Options::vsr15(),

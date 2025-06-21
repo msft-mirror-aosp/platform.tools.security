@@ -1,6 +1,7 @@
 //! Defines the context type for a session handling hwtrust data structures.
 
 use crate::dice::ProfileVersion;
+use crate::rkp::DeviceInfoVersion;
 use anyhow::bail;
 use clap::ValueEnum;
 use std::ops::RangeInclusive;
@@ -26,6 +27,8 @@ pub struct Options {
     pub is_factory: bool,
     /// Verbose output
     pub verbose: bool,
+    /// Expected DeviceInfo version(s)
+    pub device_info_range: DeviceInfoRange,
 }
 
 /// The set of RKP instances associated to the session.
@@ -108,7 +111,56 @@ impl Default for DiceProfileRange {
     }
 }
 
+/// An inclusive range of DeviceInfoVersions.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DeviceInfoRange(RangeInclusive<DeviceInfoVersion>);
+
+impl DeviceInfoRange {
+    /// Creates a new inclusive range of DeviceInfoVersions.
+    pub fn new(start: DeviceInfoVersion, end: DeviceInfoVersion) -> Self {
+        Self(RangeInclusive::new(start, end))
+    }
+
+    /// Creates a new inclusive range of DeviceInfoVersions with only the specified version in the range.
+    pub fn single(version: DeviceInfoVersion) -> Self {
+        Self(RangeInclusive::new(version, version))
+    }
+
+    /// Returns `true` if `version` is contained in the range.
+    pub fn contains(&self, version: DeviceInfoVersion) -> bool {
+        self.0.contains(&version)
+    }
+
+    /// Returns the lower bound of the range.
+    pub fn start(&self) -> DeviceInfoVersion {
+        *self.0.start()
+    }
+
+    /// Returns the upper bound of the range.
+    pub fn end(&self) -> DeviceInfoVersion {
+        *self.0.end()
+    }
+}
+
+impl Default for DeviceInfoRange {
+    fn default() -> Self {
+        Self::new(DeviceInfoVersion::V2, DeviceInfoVersion::V3)
+    }
+}
+
 impl Options {
+    /// The options use by VSR 12.
+    pub fn vsr12() -> Self {
+        Self {
+            dice_profile_range: DiceProfileRange::new(
+                ProfileVersion::Android13,
+                ProfileVersion::Android15,
+            ),
+            device_info_range: DeviceInfoRange::single(DeviceInfoVersion::V1),
+            ..Default::default()
+        }
+    }
+
     /// The options use by VSR 13.
     pub fn vsr13() -> Self {
         Self {
@@ -116,6 +168,7 @@ impl Options {
                 ProfileVersion::Android13,
                 ProfileVersion::Android15,
             ),
+            device_info_range: DeviceInfoRange::single(DeviceInfoVersion::V2),
             ..Default::default()
         }
     }
@@ -127,6 +180,7 @@ impl Options {
                 ProfileVersion::Android14,
                 ProfileVersion::Android15,
             ),
+            device_info_range: DeviceInfoRange::single(DeviceInfoVersion::V3),
             ..Default::default()
         }
     }
@@ -138,6 +192,7 @@ impl Options {
                 ProfileVersion::Android14,
                 ProfileVersion::Android15,
             ),
+            device_info_range: DeviceInfoRange::single(DeviceInfoVersion::V3),
             ..Default::default()
         }
     }
@@ -149,6 +204,7 @@ impl Options {
                 ProfileVersion::Android14,
                 ProfileVersion::Android16,
             ),
+            device_info_range: DeviceInfoRange::single(DeviceInfoVersion::V3),
             ..Default::default()
         }
     }
