@@ -94,7 +94,7 @@ void test_msan_crash_stack() {
 
 // crashes if built with -fsanitize=integer
 void test_integer_overflow() {
-  size_t max = (size_t)-1;
+  [[maybe_unused]] size_t max = (size_t)-1;
   max++;
   printf("UBSAN: Integer Overflow Test Failed\n");
 }
