@@ -64,3 +64,33 @@ fn exit_code_for_bad_csr() {
         Command::new(hwtrust_bin()).args(["csr", "testdata/csr/bad_csr.cbor"]).output().unwrap();
     assert!(!output.status.success());
 }
+
+#[test]
+fn exit_code_for_good_chain_with_uds_certs() {
+    let output = Command::new(hwtrust_bin())
+        .args([
+            "dice-chain",
+            "testdata/factory_csr/v3_p256_valid_with_uds_certs.chain",
+            "--uds-certs",
+            "testdata/factory_csr/v3_p256_valid_with_uds_certs.uds.0",
+            "testdata/factory_csr/v3_p256_valid_with_uds_certs.uds.1",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+}
+
+#[test]
+fn exit_code_for_mismatched_chain_with_uds_certs() {
+    let output = Command::new(hwtrust_bin())
+        .args([
+            "dice-chain",
+            "testdata/factory_csr/v3_p256_mismatched_uds_certs.chain",
+            "--uds-certs",
+            "testdata/factory_csr/v3_p256_mismatched_uds_certs.uds.0",
+            "testdata/factory_csr/v3_p256_mismatched_uds_certs.uds.1",
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+}
