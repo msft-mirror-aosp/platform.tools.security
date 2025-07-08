@@ -226,7 +226,7 @@ impl DeviceInfo {
             "security_level must be a valid production value"
         );
         ensure!(
-            self.vbmeta_digest.as_ref().map_or(true, |d| !d.iter().all(|b| *b == 0u8)),
+            self.vbmeta_digest.as_ref().is_none_or(|d| !d.iter().all(|b| *b == 0u8)),
             "vbmeta_digest must not be all zeros. Got {:?}",
             self.vbmeta_digest
         );
