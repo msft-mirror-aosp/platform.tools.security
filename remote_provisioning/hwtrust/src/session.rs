@@ -168,7 +168,7 @@ impl Options {
                 ProfileVersion::Android13,
                 ProfileVersion::Android15,
             ),
-            device_info_range: DeviceInfoRange::single(DeviceInfoVersion::V2),
+            device_info_range: DeviceInfoRange::new(DeviceInfoVersion::V2, DeviceInfoVersion::V3),
             ..Default::default()
         }
     }
