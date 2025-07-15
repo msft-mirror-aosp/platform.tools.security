@@ -1,6 +1,9 @@
 //! This module defines a helper for parsing fields in a CBOR map.
 
-use coset::{cbor::value::Value, AsCborValue, CoseEncrypt, CoseError, CoseMac0, CoseSign1};
+use coset::{
+    cbor::value::Value, AsCborValue, CoseEncrypt, CoseError, CoseMac0, CoseSign1,
+    TaggedCborSerializable,
+};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -99,10 +102,16 @@ impl FieldValue {
 
     pub fn into_optional_cose_encrypt(self) -> Result<Option<CoseEncrypt>, FieldValueError> {
         self.value
-            .map(|v| match v {
-                Value::Array(_) => CoseEncrypt::from_cbor_value(v)
-                    .map_err(|e| FieldValueError::CoseEncryptParseError(self.name, e)),
-                _ => Err(FieldValueError::NotArray(self.name, v)),
+            .map(|v| {
+                let v_for_parsing = match v {
+                    Value::Tag(CoseEncrypt::TAG, inner_v) => *inner_v,
+                    other => other,
+                };
+                match v_for_parsing {
+                    Value::Array(_) => CoseEncrypt::from_cbor_value(v_for_parsing)
+                        .map_err(|e| FieldValueError::CoseEncryptParseError(self.name, e)),
+                    _ => Err(FieldValueError::NotArray(self.name, v_for_parsing)),
+                }
             })
             .transpose()
     }
