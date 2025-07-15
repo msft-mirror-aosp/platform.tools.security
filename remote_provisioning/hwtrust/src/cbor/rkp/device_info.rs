@@ -69,10 +69,9 @@ impl DeviceInfo {
 
         ensure!(
             device_info_range.contains(parsed_version),
-            concat!(
-                "Expected DeviceInfo version range: {device_info_range:?} does not match parsed",
-                " version: {parsed_version:?}"
-            ),
+            "Expected DeviceInfo version range: {:?} does not match parsed version: {:?}",
+            device_info_range,
+            parsed_version
         );
 
         let fused = match parsed_version {
