@@ -1,6 +1,6 @@
 //! A tool for handling data related to the hardware root-of-trust.
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use hwtrust::dice;
 use hwtrust::dice::ChainForm;
@@ -48,6 +48,10 @@ enum Action {
 struct DiceChainArgs {
     /// Path to a file containing a DICE chain.
     chain: String,
+    /// Path to one or more DER-encoded X.509 certificates that certify the UDS public key.
+    /// The certificates must be provided in order from root to leaf.
+    #[clap(long, num_args = 1..)]
+    uds_certs: Option<Vec<String>>,
     /// Allow non-normal DICE chain modes.
     #[clap(long)]
     allow_any_mode: bool,
@@ -156,14 +160,24 @@ fn verify_dice_chain(args: &Args, sub_args: &DiceChainArgs) -> Result<Option<Str
     });
     let chain = dice::ChainForm::from_cbor(&session, &fs::read(&sub_args.chain)?)?;
     log_verbose!(session, "{chain:#?}");
-    if let ChainForm::Degenerate(_) = chain {
-        return Ok(Some(String::from(
+
+    if let Some(uds_certs) = &sub_args.uds_certs {
+        let uds_certs = uds_certs
+            .iter()
+            .map(|v| fs::read(v).context(format!("Failed to read UdsCert {}", v)))
+            .collect::<Result<_>>()?;
+
+        rkp::Csr::parse_and_validate_uds_certs(&chain, &[(String::from("signer"), uds_certs)])?;
+    }
+
+    Ok(match chain {
+        ChainForm::Degenerate(_) => Some(String::from(
             "WARNING!
 The given 'degenerate' DICE chain is valid. However, the degenerate chain form is deprecated in
 favor of full DICE chains, rooted in ROM, that measure the system's boot components.",
-        )));
-    }
-    Ok(None)
+        )),
+        ChainForm::Proper(_) => None,
+    })
 }
 
 fn parse_factory_csr(args: &Args, sub_args: &FactoryCsrArgs) -> Result<Option<String>> {

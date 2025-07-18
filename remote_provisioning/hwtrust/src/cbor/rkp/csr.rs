@@ -202,7 +202,7 @@ impl Csr {
         let uds_certs = FieldValue::from_optional_value("UdsCerts", csr.pop()).into_map()?;
 
         let dice_chain = ChainForm::from_value(session, raw_dice_chain)?;
-        let uds_certs = Self::parse_and_validate_uds_certs(&dice_chain, uds_certs)?;
+        let uds_certs = Self::parse_and_validate_uds_certs_from_value(&dice_chain, uds_certs)?;
 
         let signing_key = dice_chain.leaf_public_key();
         signing_key.verify_cose_sign1(&signed_data, &[]).context("verifying SignedData failed")?;
@@ -229,9 +229,32 @@ impl Csr {
         Ok(Self::V3 { dice_chain, uds_certs, challenge, csr_payload })
     }
 
-    fn parse_and_validate_uds_certs(
+    fn parse_and_validate_uds_certs_from_value(
         dice_chain: &ChainForm,
-        uds_certs: Vec<(Value, Value)>,
+        uds_certs_value: Vec<(Value, Value)>,
+    ) -> Result<HashMap<String, Vec<X509>>> {
+        let mut uds_certs = Vec::new();
+        for (signer, der_certs) in uds_certs_value {
+            let signer = FieldValue::from_value("SignerName", signer).into_string()?;
+            let der_certs = FieldValue::from_value("UdsCertChain", der_certs)
+                .into_array()?
+                .into_iter()
+                .map(|v| {
+                    FieldValue::from_value("X509Certificate", v)
+                        .into_bytes()
+                        .context("Invalid type for X509Certificate")
+                })
+                .collect::<Result<Vec<_>>>()?;
+            uds_certs.push((signer, der_certs));
+        }
+
+        Self::parse_and_validate_uds_certs(dice_chain, &uds_certs)
+    }
+
+    /// Validate UDS cert chains.
+    pub fn parse_and_validate_uds_certs(
+        dice_chain: &ChainForm,
+        uds_certs: &[(String, Vec<Vec<u8>>)],
     ) -> Result<HashMap<String, Vec<X509>>> {
         let expected_uds = match dice_chain {
             ChainForm::Degenerate(chain) => chain.public_key(),
@@ -241,16 +264,11 @@ impl Csr {
 
         let mut parsed = HashMap::new();
         for (signer, der_certs) in uds_certs {
-            let signer = FieldValue::from_value("SignerName", signer).into_string()?;
-            let x509_certs = FieldValue::from_value("UdsCertChain", der_certs)
-                .into_array()?
-                .into_iter()
-                .map(|v| match FieldValue::from_value("X509Certificate", v).into_bytes() {
-                    Ok(b) => X509::from_der(&b).context("Unable to parse DER X509Certificate"),
-                    Err(e) => Err(e).context("Invalid type for X509Certificate"),
-                })
+            let x509_certs = der_certs
+                .iter()
+                .map(|v| X509::from_der(v).context("Unable to parse DER X509Certificate"))
                 .collect::<Result<Vec<X509>>>()?;
-            Self::validate_uds_cert_path(&signer, &x509_certs)?;
+            Self::validate_uds_cert_path(signer, &x509_certs)?;
             ensure!(
                 x509_certs.last().unwrap().public_key()?.public_eq(expected_uds),
                 "UdsCert leaf for SignerName '{signer}' does not match the DICE chain root"
@@ -260,6 +278,7 @@ impl Csr {
                 "Duplicate signer found: '{signer}'"
             );
         }
+
         Ok(parsed)
     }
 
