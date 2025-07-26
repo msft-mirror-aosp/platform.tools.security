@@ -47,7 +47,8 @@ impl FromStr for ProfileVersion {
         Ok(match s {
             "android.14" => Self::Android14,
             "android.15" => Self::Android15,
-            "android.16" => Self::Android16,
+            // Allow Widevine profile version 19, which has the same rules as Android 16.
+            "android.16" | "widevine.19" => Self::Android16,
             _ => return Err(ParseProfileVersionError(())),
         })
     }
