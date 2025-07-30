@@ -79,10 +79,10 @@ fn exit_code_for_good_chain_with_uds_certs() {
     let output = Command::new(hwtrust_bin())
         .args([
             "dice-chain",
-            "testdata/factory_csr/v3_p256_valid_with_uds_certs.chain",
+            "testdata/dice/v3_p256_valid_with_uds_certs.chain",
             "--uds-certs",
-            "testdata/factory_csr/v3_p256_valid_with_uds_certs.uds.0",
-            "testdata/factory_csr/v3_p256_valid_with_uds_certs.uds.1",
+            "testdata/uds/v3_p256_valid_with_uds_certs.uds.0",
+            "testdata/uds/v3_p256_valid_with_uds_certs.uds.1",
         ])
         .output()
         .unwrap();
@@ -94,10 +94,10 @@ fn exit_code_for_mismatched_chain_with_uds_certs() {
     let output = Command::new(hwtrust_bin())
         .args([
             "dice-chain",
-            "testdata/factory_csr/v3_p256_mismatched_uds_certs.chain",
+            "testdata/dice/v3_p256_mismatched_uds_certs.chain",
             "--uds-certs",
-            "testdata/factory_csr/v3_p256_mismatched_uds_certs.uds.0",
-            "testdata/factory_csr/v3_p256_mismatched_uds_certs.uds.1",
+            "testdata/uds/v3_p256_mismatched_uds_certs.uds.0",
+            "testdata/uds/v3_p256_mismatched_uds_certs.uds.1",
         ])
         .output()
         .unwrap();
