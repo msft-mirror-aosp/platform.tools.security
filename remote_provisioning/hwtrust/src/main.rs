@@ -164,7 +164,7 @@ fn verify_dice_chain(args: &Args, sub_args: &DiceChainArgs) -> Result<Option<Str
     if let Some(uds_certs) = &sub_args.uds_certs {
         let uds_certs = uds_certs
             .iter()
-            .map(|v| fs::read(v).context(format!("Failed to read UdsCert {}", v)))
+            .map(|v| fs::read(v).context(format!("Failed to read UdsCert {v}")))
             .collect::<Result<_>>()?;
 
         rkp::Csr::parse_and_validate_uds_certs(&chain, &[(String::from("signer"), uds_certs)])?;

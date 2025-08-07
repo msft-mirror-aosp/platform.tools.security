@@ -142,11 +142,11 @@ mod tests {
                     assert_eq!(p.root_public_key(), &root_public_key);
                     assert_eq!(p.payloads().len(), 1);
                 }
-                ChainForm::Degenerate(d) => panic!("Parsed chain is not proper: {:?}", d),
+                ChainForm::Degenerate(d) => panic!("Parsed chain is not proper: {d:?}"),
             }
             assert_eq!(uds_certs.len(), 0);
         } else {
-            panic!("Parsed CSR was not V3: {:?}", csr);
+            panic!("Parsed CSR was not V3: {csr:?}");
         }
     }
 
@@ -194,11 +194,11 @@ mod tests {
                     assert_eq!(p.root_public_key(), &root_public_key);
                     assert_eq!(p.payloads().len(), 1);
                 }
-                ChainForm::Degenerate(d) => panic!("Parsed chain is not proper: {:?}", d),
+                ChainForm::Degenerate(d) => panic!("Parsed chain is not proper: {d:?}"),
             }
             assert_eq!(uds_certs.len(), 0);
         } else {
-            panic!("Parsed CSR was not V3: {:?}", csr);
+            panic!("Parsed CSR was not V3: {csr:?}");
         }
     }
 
@@ -248,7 +248,7 @@ mod tests {
                 -----END CERTIFICATE-----\n"
             );
         } else {
-            panic!("Parsed CSR was not V3: {:?}", csr);
+            panic!("Parsed CSR was not V3: {csr:?}");
         }
     }
 

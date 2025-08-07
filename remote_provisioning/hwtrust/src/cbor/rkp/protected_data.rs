@@ -38,7 +38,7 @@ impl ProtectedData {
 
         let pubkey = KeyAgreementPublicKey::from_cose_key(&pubkey_cose)?;
         let encryption_key = eek::derive_ephemeral_symmetric_key(&eek, pubkey.pkey())
-            .with_context(|| format!("for pubkey {:?}", pubkey_cose))?;
+            .with_context(|| format!("for pubkey {pubkey_cose:?}"))?;
 
         let protected_data_plaintext = protected_data
             .decrypt(&[], |ciphertext, aad| {
