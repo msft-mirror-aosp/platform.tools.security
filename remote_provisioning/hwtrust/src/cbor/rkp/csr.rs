@@ -409,11 +409,11 @@ mod tests {
                     assert_eq!(payloads[0].config_desc().security_version(), None);
                     assert_eq!(payloads[0].config_desc().extensions(), []);
                 }
-                ChainForm::Degenerate(d) => panic!("Parsed chain is not proper: {:?}", d),
+                ChainForm::Degenerate(d) => panic!("Parsed chain is not proper: {d:?}"),
             }
             assert_eq!(uds_certs.len(), 0);
         } else {
-            panic!("Parsed CSR was not V3: {:?}", csr);
+            panic!("Parsed CSR was not V3: {csr:?}");
         }
     }
 
@@ -437,11 +437,11 @@ mod tests {
         };
         let csr = Csr::from_cbor(&session, input.as_slice())?;
         let Csr::V3 { dice_chain, csr_payload, .. } = csr else {
-            panic!("Parsed CSR was not V3: {:?}", csr);
+            panic!("Parsed CSR was not V3: {csr:?}");
         };
         assert_eq!(csr_payload.device_info.security_level, DeviceInfoSecurityLevel::Avf);
         let ChainForm::Proper(proper_chain) = dice_chain else {
-            panic!("Parsed chain is not proper: {:?}", dice_chain);
+            panic!("Parsed chain is not proper: {dice_chain:?}");
         };
         let expected_len = 7;
         assert_eq!(proper_chain.payloads().len(), expected_len);

@@ -82,7 +82,7 @@ impl Chain {
         log_verbose!(session, "Received DICE chain with {} entries", values.len());
         for (n, value) in values.enumerate() {
             let entry = Entry::verify_cbor_value(value, previous_public_key)
-                .with_context(|| format!("Invalid entry at index {}", n))?;
+                .with_context(|| format!("Invalid entry at index {n}"))?;
             let is_root = n == 0;
             let config_format = if is_root
                 && session.options.dice_profile_range.contains(ProfileVersion::Android14)
@@ -93,7 +93,7 @@ impl Chain {
                 ConfigFormat::default()
             };
             let payload = Payload::from_cbor(session, entry.payload(), config_format, is_root)
-                .with_context(|| format!("Invalid payload at index {}", n))?;
+                .with_context(|| format!("Invalid payload at index {n}"))?;
             log_verbose!(session, "Entry {n}: {payload:?}");
             payloads.push(payload);
             let previous = payloads.last().unwrap();
@@ -299,7 +299,7 @@ mod tests {
         let config_desc = ConfigDesc::default();
         let config_hash = sha512(&serialize(config_desc.to_cbor_value())).to_vec();
         PayloadBuilder::with_subject_public_key(key)
-            .issuer(format!("item {}", index))
+            .issuer(format!("item {index}"))
             .subject(format!("item {}", index + 1))
             .mode(DiceMode::Normal)
             .code_hash(vec![6; 64])

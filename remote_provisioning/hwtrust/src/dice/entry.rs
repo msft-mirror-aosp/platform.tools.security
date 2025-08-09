@@ -314,19 +314,19 @@ impl ConfigDesc {
 impl Display for ConfigDesc {
     fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
         if let Some(component_name) = &self.component_name {
-            writeln!(f, "Component Name: {}", component_name)?;
+            writeln!(f, "Component Name: {component_name}")?;
         }
         if let Some(component_instance_name) = &self.component_instance_name {
-            writeln!(f, "Component Instance Name: {}", component_instance_name)?;
+            writeln!(f, "Component Instance Name: {component_instance_name}")?;
         }
         if let Some(component_version) = &self.component_version {
-            writeln!(f, "Component Version: {}", component_version)?;
+            writeln!(f, "Component Version: {component_version}")?;
         }
         if self.resettable {
             writeln!(f, "Resettable")?;
         }
         if let Some(security_version) = &self.security_version {
-            writeln!(f, "Security Version: {}", security_version)?;
+            writeln!(f, "Security Version: {security_version}")?;
         }
         if self.rkp_vm_marker {
             writeln!(f, "RKP VM Marker")?;

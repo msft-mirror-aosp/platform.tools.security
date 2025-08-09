@@ -170,8 +170,8 @@ impl Display for Chain {
         writeln!(f, "Root public key:")?;
         writeln!(f, "{}", self.root_public_key.to_pem())?;
         for (i, payload) in self.payloads.iter().enumerate() {
-            writeln!(f, "Cert {}:", i)?;
-            writeln!(f, "{}", payload)?;
+            writeln!(f, "Cert {i}:")?;
+            writeln!(f, "{payload}")?;
         }
         Ok(())
     }
@@ -414,7 +414,7 @@ mod tests {
 
     fn valid_payload(index: usize, pem: &str) -> PayloadBuilder {
         PayloadBuilder::with_subject_public_key(PrivateKey::from_pem(pem).public_key())
-            .issuer(format!("component {}", index))
+            .issuer(format!("component {index}"))
             .subject(format!("component {}", index + 1))
             .mode(DiceMode::Normal)
             .code_hash(vec![0; 64])

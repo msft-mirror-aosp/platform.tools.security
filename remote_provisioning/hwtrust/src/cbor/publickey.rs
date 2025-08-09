@@ -386,7 +386,7 @@ mod tests {
             let x =
                 get_label_value_as_bytes(&cose_key, Label::Int(iana::OkpKeyParameter::X.to_i64()))
                     .unwrap();
-            assert_eq!(x.len(), expected_size, "X coordinate is the wrong size\n{}", pem);
+            assert_eq!(x.len(), expected_size, "X coordinate is the wrong size\n{pem}");
             assert_eq!(x[0], 0);
         }
     }
@@ -410,12 +410,12 @@ mod tests {
             let x =
                 get_label_value_as_bytes(&cose_key, Label::Int(iana::Ec2KeyParameter::X.to_i64()))
                     .unwrap();
-            assert_eq!(x.len(), expected_size, "X coordinate is the wrong size\n{}", pem);
+            assert_eq!(x.len(), expected_size, "X coordinate is the wrong size\n{pem}");
 
             let y =
                 get_label_value_as_bytes(&cose_key, Label::Int(iana::Ec2KeyParameter::Y.to_i64()))
                     .unwrap();
-            assert_eq!(y.len(), expected_size, "Y coordinate is the wrong size\n{}", pem);
+            assert_eq!(y.len(), expected_size, "Y coordinate is the wrong size\n{pem}");
             assert!(first_byte_check(x, y));
         }
         assert!(curves.contains(&EcKind::P256));

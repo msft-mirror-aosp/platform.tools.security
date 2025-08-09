@@ -143,7 +143,7 @@ where
 {
     let mut options: Options = kind.try_into()?;
     let Ok(rkp_instance) = RkpInstance::from_str(instance) else {
-        return Err(format!("invalid RKP instance: {}", instance));
+        return Err(format!("invalid RKP instance: {instance}"));
     };
     if rkp_instance == RkpInstance::Avf {
         options.dice_profile_range =
@@ -178,7 +178,7 @@ fn verify_dice_chain(
             ffi::VerifyDiceChainResult { error: "".to_string(), chain, len }
         }
         Err(e) => {
-            let error = format!("{:#}", e);
+            let error = format!("{e:#}");
             ffi::VerifyDiceChainResult { error, chain: Box::new(DiceChain(None)), len: 0 }
         }
     }
@@ -294,7 +294,7 @@ fn validate_csr(
             ffi::ValidateCsrResult { error: "".to_string(), csr }
         }
         Err(e) => {
-            let error = format!("{:#}", e);
+            let error = format!("{e:#}");
             ffi::ValidateCsrResult { error, csr: Box::new(Csr(None)) }
         }
     }
