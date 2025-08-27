@@ -1,0 +1,151 @@
+cc_fuzz {
+    name: "readfromvalue_fuzzer",
+    srcs: [
+        "readfromvalue_fuzzer.cpp",
+    ],
+    header_libs: [
+        "libaudioeffects",
+    ],
+    shared_libs: [
+        "libaudioutils",
+        "libbase",
+        "liblog",
+        "libutils",
+    ],
+    fuzz_config: {
+        componentid: 330367,
+        hotlists: ["4593311"],
+        triage_assignee: "cobark@google.com",
+    },
+    host_supported: false,
+}
+
+cc_fuzz {
+    name: "log_fuzzer",
+    srcs: [
+        "log_fuzzer.cpp",
+    ],
+    shared_libs: [
+        "libaudioutils",
+        "libcutils",
+        "liblog",
+    ],
+    cflags: [
+        "-Wall",
+        "-Werror",
+        "-Wextra",
+        "-Wno-format-security",
+    ],
+    fuzz_config: {
+        componentid: 330367,
+        hotlists: ["4593311"],
+        triage_assignee: "cobark@google.com",
+    },
+    host_supported: false,
+}
+
+cc_fuzz {
+    name: "adjust_channels_fuzzer",
+    srcs: [
+        "adjust_channels_fuzzer.cpp",
+    ],
+    static_libs: [
+        "libaudioutils",
+    ],
+    fuzz_config: {
+        componentid: 330367,
+        hotlists: ["4593311"],
+        triage_assignee: "cobark@google.com",
+    },
+    host_supported: false,
+}
+
+cc_fuzz {
+    name: "adjust_channels_non_destructive_fuzzer",
+    srcs: [
+        "adjust_channels_non_destructive_fuzzer.cpp",
+    ],
+    shared_libs: [
+        "libaudioutils",
+        "libcutils",
+        "liblog",
+    ],
+    fuzz_config: {
+        componentid: 330367,
+        hotlists: ["4593311"],
+        triage_assignee: "cobark@google.com",
+    },
+    host_supported: false,
+}
+
+cc_fuzz {
+    name: "add_fuzzer",
+    srcs: [
+        "add_fuzzer.cpp",
+    ],
+    shared_libs: [
+        "libaudioutils",
+    ],
+    fuzz_config: {
+        componentid: 330367,
+        hotlists: ["4593311"],
+        triage_assignee: "cobark@google.com",
+    },
+    host_supported: false,
+}
+
+cc_fuzz {
+    name: "audio_utils_fifo_fuzzer",
+    srcs: [
+        "audio_utils_fifo_fuzzer.cpp",
+    ],
+    static_libs: [
+        "libFuzzer",
+    ],
+    shared_libs: [
+        "libaudioutils",
+    ],
+    fuzz_config: {
+        componentid: 330367,
+        hotlists: ["4593311"],
+        triage_assignee: "cobark@google.com",
+    },
+    host_supported: false,
+}
+
+cc_fuzz {
+    name: "write_fuzzer",
+    srcs: [
+        "write_fuzzer.cpp",
+    ],
+    shared_libs: [
+        "libaudioutils",
+    ],
+    static_libs: [
+        "libFuzzer",
+    ],
+    fuzz_config: {
+        componentid: 330367,
+        hotlists: ["4593311"],
+        triage_assignee: "cobark@google.com",
+    },
+    host_supported: false,
+}
+
+cc_fuzz {
+    name: "set_fuzzer",
+    srcs: [
+        "set_fuzzer.cpp",
+    ],
+    shared_libs: [
+        "libaudioutils",
+        "libcutils",
+        "liblog",
+    ],
+    fuzz_config: {
+        componentid: 330367,
+        hotlists: ["4593311"],
+        triage_assignee: "cobark@google.com",
+    },
+    host_supported: false,
+}
