@@ -104,6 +104,8 @@ enum VsrVersion {
     Vsr15,
     /// VSR 16 / Android W / 2025
     Vsr16,
+    /// VSR 17 / Android C / 26Q2
+    Vsr17,
 }
 
 fn session_from_args<F>(args: &Args, set_options: F) -> Session
@@ -115,7 +117,8 @@ where
         Some(VsrVersion::Vsr13) => Options::vsr13(),
         Some(VsrVersion::Vsr14) => Options::vsr14(),
         Some(VsrVersion::Vsr15) => Options::vsr15(),
-        Some(VsrVersion::Vsr16) => {
+        Some(VsrVersion::Vsr16) => Options::vsr16(),
+        Some(VsrVersion::Vsr17) => {
             println!();
             println!();
             println!("  ********************************************************************");
@@ -125,7 +128,7 @@ where
             println!("  ********************************************************************");
             println!();
             println!();
-            Options::vsr16()
+            Options::vsr17()
         }
         None => Options::default(),
     };

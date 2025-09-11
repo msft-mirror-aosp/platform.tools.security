@@ -149,7 +149,7 @@ impl Default for DeviceInfoRange {
 }
 
 impl Options {
-    /// The options use by VSR 12.
+    /// The options used by VSR 12.
     pub fn vsr12() -> Self {
         Self {
             dice_profile_range: DiceProfileRange::new(
@@ -161,7 +161,7 @@ impl Options {
         }
     }
 
-    /// The options use by VSR 13.
+    /// The options used by VSR 13.
     pub fn vsr13() -> Self {
         Self {
             dice_profile_range: DiceProfileRange::new(
@@ -173,7 +173,7 @@ impl Options {
         }
     }
 
-    /// The options use by VSR 14.
+    /// The options used by VSR 14.
     pub fn vsr14() -> Self {
         Self {
             dice_profile_range: DiceProfileRange::new(
@@ -185,7 +185,7 @@ impl Options {
         }
     }
 
-    /// The options use by VSR 15.
+    /// The options used by VSR 15.
     pub fn vsr15() -> Self {
         Self {
             dice_profile_range: DiceProfileRange::new(
@@ -197,7 +197,7 @@ impl Options {
         }
     }
 
-    /// The options use by VSR 16.
+    /// The options used by VSR 16.
     pub fn vsr16() -> Self {
         Self {
             dice_profile_range: DiceProfileRange::new(
@@ -207,5 +207,10 @@ impl Options {
             device_info_range: DeviceInfoRange::single(DeviceInfoVersion::V3),
             ..Default::default()
         }
+    }
+
+    /// The options used by VSR 17.
+    pub fn vsr17() -> Self {
+        Self::vsr16()
     }
 }
