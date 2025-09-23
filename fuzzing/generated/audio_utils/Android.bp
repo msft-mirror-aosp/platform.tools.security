@@ -1,16 +1,17 @@
+package {
+    default_team: "trendy_team_attack_tools",
+}
+
 cc_fuzz {
     name: "readfromvalue_fuzzer",
     srcs: [
         "readfromvalue_fuzzer.cpp",
     ],
+    shared_libs: [
+        "libutils",
+    ],
     header_libs: [
         "libaudioeffects",
-    ],
-    shared_libs: [
-        "libaudioutils",
-        "libbase",
-        "liblog",
-        "libutils",
     ],
     fuzz_config: {
         componentid: 330367,
