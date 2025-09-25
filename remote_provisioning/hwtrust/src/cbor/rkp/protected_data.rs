@@ -41,23 +41,27 @@ impl ProtectedData {
             .with_context(|| format!("for pubkey {pubkey_cose:?}"))?;
 
         let protected_data_plaintext = protected_data
-            .decrypt(&[], |ciphertext, aad| {
-                let (ciphertext, tag) = ciphertext.split_at(ciphertext.len() - 16);
-                let mut plaintext = Vec::new();
-                let mut ctx = CipherCtx::new().context("Unable to load cipher context")?;
-                // decrypt_init must be called twice because our IV is not 12 bytes, which is what
-                // AES-GCM wants by default. The first init tells openssl the cipher+mode, then we
-                // can tell openssl the IV len, and only after that can we set the non-standard IV.
-                ctx.decrypt_init(Some(Cipher::aes_256_gcm()), Some(&encryption_key), None)?;
-                ctx.set_iv_length(protected_data.unprotected.iv.len())?;
-                ctx.decrypt_init(None, None, Some(&protected_data.unprotected.iv))?;
-                ctx.set_tag(tag)?;
-                ctx.cipher_update(aad, None).context("Error setting AAD on cipher")?;
-                ctx.cipher_update_vec(ciphertext, &mut plaintext)
-                    .context("Error decrypting ciphertext")?;
-                ctx.cipher_final_vec(&mut plaintext).context("Error finalizing decryption")?;
-                Ok::<Vec<u8>, anyhow::Error>(plaintext)
-            })
+            .decrypt_ciphertext(
+                &[],
+                || anyhow!("missing ciphertext"),
+                |ciphertext, aad| {
+                    let (ciphertext, tag) = ciphertext.split_at(ciphertext.len() - 16);
+                    let mut plaintext = Vec::new();
+                    let mut ctx = CipherCtx::new().context("Unable to load cipher context")?;
+                    // decrypt_init must be called twice because our IV is not 12 bytes, which is what
+                    // AES-GCM wants by default. The first init tells openssl the cipher+mode, then we
+                    // can tell openssl the IV len, and only after that can we set the non-standard IV.
+                    ctx.decrypt_init(Some(Cipher::aes_256_gcm()), Some(&encryption_key), None)?;
+                    ctx.set_iv_length(protected_data.unprotected.iv.len())?;
+                    ctx.decrypt_init(None, None, Some(&protected_data.unprotected.iv))?;
+                    ctx.set_tag(tag)?;
+                    ctx.cipher_update(aad, None).context("Error setting AAD on cipher")?;
+                    ctx.cipher_update_vec(ciphertext, &mut plaintext)
+                        .context("Error decrypting ciphertext")?;
+                    ctx.cipher_final_vec(&mut plaintext).context("Error finalizing decryption")?;
+                    Ok::<Vec<u8>, anyhow::Error>(plaintext)
+                },
+            )
             .context("while decrypting ProtectedData")?;
 
         Self::from_cbor_bytes(
