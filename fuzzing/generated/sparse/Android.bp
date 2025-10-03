@@ -1,0 +1,22 @@
+package {
+    default_team: "trendy_team_attack_tools",
+}
+
+cc_fuzz {
+    name: "sparse_file_callback_fuzzer",
+    srcs: [
+        "sparse_file_callback_fuzzer.cpp",
+    ],
+    static_libs: [
+        "libsparse",
+        "libz",
+        "libbase",
+    ],
+    cflags: [
+        "-Wall",
+        "-Werror",
+        "-Wextra",
+        "-Wno-sign-compare",
+    ],
+    host_supported: false,
+}

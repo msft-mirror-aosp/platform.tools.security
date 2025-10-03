@@ -1,0 +1,79 @@
+package {
+    default_team: "trendy_team_attack_tools",
+}
+
+cc_fuzz {
+    name: "libutils_native_handle_create_fuzzer",
+    srcs: [
+        "create_fuzzer.cpp",
+    ],
+    static_libs: [
+        "libbase",
+    ],
+    shared_libs: [
+        "libcutils",
+        "libutils",
+        "liblog",
+    ],
+    cflags: [
+        "-Wall",
+        "-Werror",
+        "-Wextra",
+    ],
+    fuzz_config: {
+        componentid: 330367,
+        hotlists: ["4593311"],
+        triage_assignee: "cobark@google.com",
+    },
+    host_supported: false,
+}
+
+cc_fuzz {
+    name: "libutils_sorted_vector_erase_fuzzer",
+    srcs: [
+        "erase_fuzzer.cpp",
+    ],
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+    ],
+    shared_libs: [
+        "libutils",
+        "liblog",
+    ],
+    static_libs: [
+        "libbase",
+        "libcutils",
+    ],
+    fuzz_config: {
+        componentid: 330367,
+        hotlists: ["4593311"],
+        triage_assignee: "cobark@google.com",
+    },
+    host_supported: false,
+}
+
+cc_fuzz {
+    name: "libutils_sorted_vector_remove_fuzzer",
+    srcs: [
+        "remove_fuzzer.cpp",
+    ],
+    shared_libs: [
+        "libutils",
+    ],
+    static_libs: [
+        "libbase",
+    ],
+    cflags: [
+        "-Wall",
+        "-Werror",
+        "-Wextra",
+    ],
+    fuzz_config: {
+        componentid: 330367,
+        hotlists: ["4593311"],
+        triage_assignee: "cobark@google.com",
+    },
+    host_supported: false,
+}

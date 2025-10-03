@@ -1,82 +1,88 @@
 #include <fuzzer/FuzzedDataProvider.h>
-#include <system/audio_effects/audio_effects_utils.h>
-#include <utils/Errors.h>
-#include <cstdint>
-#include <cstring>
 #include <vector>
-#include <algorithm>
+#include <cstdint>
+
+// For EffectParamReader
+#include "system/audio_effects/audio_effects_utils.h"
+// For effect_param_t
+#include "system/audio_effect.h"
+// For status_t, OK
+#include "utils/Errors.h"
 
 using android::effect::utils::EffectParamReader;
 
-// Helper to dispatch read calls for different types.
-// A static buffer is used as the destination for read operations to avoid
-// repeated heap allocations or stack overflows within the fuzzer.
-template <typename T>
-void perform_read(EffectParamReader& reader, FuzzedDataProvider& provider) {
-    static uint8_t buffer[4096];
-
-    // Allow the fuzzer to choose 'n' across the full range of size_t.
-    // A large 'n' can cause an integer overflow in the calculation `n * sizeof(T)`,
-    // which is the primary vulnerability pattern we are targeting. An overflow can
-    // bypass the boundary checks inside readFromValue and lead to an out-of-bounds read.
-    const size_t n = provider.ConsumeIntegral<size_t>();
-
-    // The destination buffer's size is not known by readFromValue. We pass the
-    // fuzzer-controlled 'n' to test the function's internal size validation logic.
-    // If the validation is bypassed due to an overflow, the subsequent memcpy may
-    // write out of bounds of our static buffer, leading to a crash that identifies the bug.
-    reader.readFromValue(reinterpret_cast<T*>(buffer), n);
-}
-
+// This is the entry point for the libFuzzer engine.
+// It takes a buffer of fuzzer-generated data and its size.
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     FuzzedDataProvider provider(data, size);
 
-    // Let the fuzzer control psize. A larger range allows the initial read offset
-    // (mValueROffset) to be large, which is a key component for triggering
-    // integer overflows in boundary checks (offset + length).
-    const uint32_t psize = provider.ConsumeIntegralInRange<uint32_t>(0, 65536);
+    // --- Setup Code ---
+    // 1. Generate the effect_param_t structure and its data buffer.
+    // We consume a variable-sized chunk of the fuzz data to represent the entire
+    // effect_param_t structure, including its flexible data array. This allows
+    // the fuzzer to directly manipulate psize, vsize, and the data content.
+    std::vector<uint8_t> param_buffer = provider.ConsumeBytes<uint8_t>(
+        provider.ConsumeIntegralInRange<size_t>(0, 4096));
 
-    // The rest of the data will be used for the value part.
-    std::vector<uint8_t> value_data = provider.ConsumeRemainingBytes<uint8_t>();
-    const uint32_t vsize = value_data.size();
-
-    // Replicate the implementation's padding logic.
-    const size_t padded_psize =
-            (psize == 0) ? 0 : (((psize - 1) / sizeof(int32_t) + 1) * sizeof(int32_t));
-    const size_t total_data_size = padded_psize + vsize;
-
-    // Allocate memory for effect_param_t and the data.
-    std::vector<uint8_t> param_buffer(sizeof(effect_param_t) + total_data_size);
+    // The buffer must be at least large enough to hold the effect_param_t header.
+    if (param_buffer.size() < sizeof(effect_param_t)) {
+        return 0;
+    }
     effect_param_t* param = reinterpret_cast<effect_param_t*>(param_buffer.data());
 
-    // Initialize the effect_param_t structure.
-    param->psize = psize;
-    param->vsize = vsize;
-
-    // Place the fuzzer-controlled data into the 'value' section of the buffer.
-    if (vsize > 0) {
-        memcpy(param->data + padded_psize, value_data.data(), vsize);
-    }
-
+    // 2. Instantiate the EffectParamReader with the fuzzer-generated parameter struct.
+    // The reader's internal state (like the initial read offset) is determined by
+    // the psize and vsize fields within the 'param' structure.
     EffectParamReader reader(*param);
 
-    // Use the fuzzer data to drive a sequence of read operations.
-    // This tests the stateful nature of the reader (advancing offsets), which is
-    // crucial for getting the internal offset into a state where adding a large
-    // length can cause a wraparound.
+    // --- Fuzzing Loop: Target Invocation ---
+    // Emulate real-world usage by performing a series of sequential reads.
+    // This tests the stateful nature of the reader, specifically how the internal
+    // read offset (mValueROffset) is advanced after each successful read.
     while (provider.remaining_bytes() > 0) {
-        // Use a dispatcher to test different template instantiations, including a wider
-        // range of integer types to vary the sizeof(T) multiplier.
-        typedef void (*ReadFunction)(EffectParamReader&, FuzzedDataProvider&);
-        const ReadFunction funcs[] = {
-                perform_read<uint8_t>,  perform_read<int8_t>,
-                perform_read<uint16_t>, perform_read<int16_t>,
-                perform_read<uint32_t>, perform_read<int32_t>,
-                perform_read<uint64_t>, perform_read<int64_t>,
-                perform_read<float>,    perform_read<double>,
-        };
-        // Pick a random read function to execute
-        provider.PickValueInArray(funcs)(reader, provider);
+        // Use the provider to decide which type of data to read and how many elements.
+        uint8_t type_selector = provider.ConsumeIntegral<uint8_t>();
+        size_t n = provider.ConsumeIntegralInRange<size_t>(0, 128);
+
+        // It's valid to read 0 elements, so we don't skip it.
+
+        switch (type_selector % 7) {
+            case 0: {
+                std::vector<uint8_t> read_buffer(n);
+                reader.readFromValue(read_buffer.data(), n);
+                break;
+            }
+            case 1: {
+                std::vector<int8_t> read_buffer(n);
+                reader.readFromValue(read_buffer.data(), n);
+                break;
+            }
+            case 2: {
+                std::vector<uint16_t> read_buffer(n);
+                reader.readFromValue(read_buffer.data(), n);
+                break;
+            }
+            case 3: {
+                std::vector<int32_t> read_buffer(n);
+                reader.readFromValue(read_buffer.data(), n);
+                break;
+            }
+            case 4: {
+                std::vector<int64_t> read_buffer(n);
+                reader.readFromValue(read_buffer.data(), n);
+                break;
+            }
+            case 5: {
+                std::vector<float> read_buffer(n);
+                reader.readFromValue(read_buffer.data(), n);
+                break;
+            }
+            case 6: {
+                std::vector<double> read_buffer(n);
+                reader.readFromValue(read_buffer.data(), n);
+                break;
+            }
+        }
     }
 
     return 0;
