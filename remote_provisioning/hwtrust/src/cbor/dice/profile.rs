@@ -98,7 +98,7 @@ impl Profile {
 
     /// The rules for the "android.16" profile..
     pub(super) fn android16() -> Self {
-        Self::default()
+        Self { config_hash_unverified: true, ..Self::default() }
     }
 }
 
