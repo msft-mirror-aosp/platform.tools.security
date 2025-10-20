@@ -310,6 +310,10 @@ impl Csr {
         // Setting this flag causes the signature on the root certificate to be checked.
         // This ensures that the root certificate has not been corrupted.
         root_store_builder.set_flags(X509VerifyFlags::CHECK_SS_SIGNATURE)?;
+        // The DICE specification suggests that some extensions should be marked as critical.
+        // However, this general tool has no knowledge of the format of custom extensions,
+        // so we choose to ignore them here.
+        root_store_builder.set_flags(X509VerifyFlags::IGNORE_CRITICAL)?;
 
         let root_store = root_store_builder.build();
 
