@@ -24,12 +24,30 @@ cc_fuzz {
     srcs: [
         "example_mte_fuzzer.cpp",
     ],
+    host_supported: false,
+    target: {
+        android_arm64: {
+            enabled: true,
+        },
+        android_arm: {
+            enabled: false,
+        },
+        android_x86_64: {
+            enabled: false,
+        },
+        android_x86: {
+            enabled: false,
+        },
+        android_riscv64: {
+            enabled: false,
+        },
+    },
 
     fuzz_config: {
         description: "Test Fuzzer",
         production_date: "10/7/2025",
         critical: false,
-        fuzz_on_haiku_device: false,
+        fuzz_on_haiku_device: true,
         fuzz_on_haiku_host: false,
         vector: "local_no_privileges_required",
         service_privilege: "nsi",

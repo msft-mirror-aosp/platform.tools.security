@@ -14,20 +14,100 @@
  * limitations under the License.
  */
 
-#include <stdint.h>
-#include <stddef.h>
+#include <fuzzer/FuzzedDataProvider.h>
+
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
 
 /*
- * This is a simple example fuzzer that attempts to read out of bounds of the
- * provided input data. This is to check whether MTE devices can be used to
- * detect memory safety issues.
+ * This fuzzer demonstrates different crashes and failures
+ * to test the crash detection capabilities of MTE.
  */
-extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
-  if (size > 2) {
-    if (data[0] == 'M' && data[1] == 'T' && data[2] == 'E') {
-      return data[size];
-    }
+
+extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
+  FuzzedDataProvider fdp(data, size);
+  if (size < 1) {
+    return 0;
   }
 
-  return 0;
+  uint8_t minLen = 1;
+  uint8_t maxLen = size > 255 ? 255 : size;
+  uint8_t allocSize = fdp.ConsumeIntegralInRange<uint8_t>(minLen, maxLen);
+  uint8_t iterations = fdp.ConsumeIntegralInRange<uint8_t>(minLen, maxLen);
+  uint8_t* heapBuf = (uint8_t*)malloc(allocSize);
+  int stackBuf[allocSize];
+
+  memcpy(heapBuf, data, allocSize);
+
+  while (iterations--) {
+    uint8_t choice = fdp.ConsumeIntegralInRange<uint8_t>(0, 10);
+    switch (choice) {
+      // Stack Out-of-Bounds Write
+      case 0: {
+        stackBuf[allocSize] = iterations;
+        break;
+      }
+
+      // Heap Out-of-Bounds Write
+      case 1: {
+        heapBuf[allocSize] = iterations;
+        break;
+      }
+
+      // Stack Out-of-Bounds Read
+      case 2: {
+        return stackBuf[size];
+        break;
+      }
+
+      // Heap Out-of-Bounds Read
+      case 3: {
+        return data[size];
+        break;
+      }
+
+      // Use-After-Free
+      case 4: {
+        uint8_t* buffer = (uint8_t*)malloc(allocSize);
+        if (buffer) {
+          buffer[0] = iterations;
+          free(buffer);
+          return buffer[0];
+        }
+        break;
+      }
+
+      // Abort.
+      case 5: {
+        abort();
+        break;
+      }
+
+      // SIGILL.
+      case 6: {
+        __builtin_trap();
+        break;
+      }
+
+      // Null Pointer Dereference
+      case 7: {
+        int* ptr = nullptr;
+        *ptr = iterations;
+        break;
+      }
+
+      // Following are done to ensure compiler doesn't optimize these out
+      default: {
+        heapBuf[0] = iterations;
+        break;
+      }
+    }
+  }
+  int sum = 0;
+  for (size_t i = 0; i < allocSize; i++) {
+    sum += heapBuf[i];
+  }
+  free(heapBuf);
+  return sum;
 }
