@@ -202,7 +202,11 @@ impl Csr {
         let uds_certs = FieldValue::from_optional_value("UdsCerts", csr.pop()).into_map()?;
 
         let dice_chain = ChainForm::from_value(session, raw_dice_chain)?;
-        let uds_certs = Self::parse_and_validate_uds_certs_from_value(&dice_chain, uds_certs)?;
+        let uds_certs = Self::parse_and_validate_uds_certs_from_value(
+            &dice_chain,
+            uds_certs,
+            session.options.is_factory,
+        )?;
 
         let signing_key = dice_chain.leaf_public_key();
         signing_key.verify_cose_sign1(&signed_data, &[]).context("verifying SignedData failed")?;
@@ -232,6 +236,7 @@ impl Csr {
     fn parse_and_validate_uds_certs_from_value(
         dice_chain: &ChainForm,
         uds_certs_value: Vec<(Value, Value)>,
+        is_factory: bool,
     ) -> Result<HashMap<String, Vec<X509>>> {
         let mut uds_certs = Vec::new();
         for (signer, der_certs) in uds_certs_value {
@@ -248,13 +253,14 @@ impl Csr {
             uds_certs.push((signer, der_certs));
         }
 
-        Self::parse_and_validate_uds_certs(dice_chain, &uds_certs)
+        Self::parse_and_validate_uds_certs(dice_chain, &uds_certs, is_factory)
     }
 
     /// Validate UDS cert chains.
     pub fn parse_and_validate_uds_certs(
         dice_chain: &ChainForm,
         uds_certs: &[(String, Vec<Vec<u8>>)],
+        is_factory: bool,
     ) -> Result<HashMap<String, Vec<X509>>> {
         let expected_uds = match dice_chain {
             ChainForm::Degenerate(chain) => chain.public_key(),
@@ -268,7 +274,7 @@ impl Csr {
                 .iter()
                 .map(|v| X509::from_der(v).context("Unable to parse DER X509Certificate"))
                 .collect::<Result<Vec<X509>>>()?;
-            Self::validate_uds_cert_path(signer, &x509_certs)?;
+            Self::validate_uds_cert_path(signer, &x509_certs, is_factory)?;
             ensure!(
                 x509_certs.last().unwrap().public_key()?.public_eq(expected_uds),
                 "UdsCert leaf for SignerName '{signer}' does not match the DICE chain root"
@@ -282,7 +288,7 @@ impl Csr {
         Ok(parsed)
     }
 
-    fn validate_uds_cert_path(signer: &String, certs: &Vec<X509>) -> Result<()> {
+    fn validate_uds_cert_path(signer: &String, certs: &Vec<X509>, is_factory: bool) -> Result<()> {
         ensure!(
             certs.len() > 1,
             "Certificate chain for signer '{signer}' is too short: {certs:#?}"
@@ -314,6 +320,10 @@ impl Csr {
         // However, this general tool has no knowledge of the format of custom extensions,
         // so we choose to ignore them here.
         root_store_builder.set_flags(X509VerifyFlags::IGNORE_CRITICAL)?;
+        if is_factory {
+            // Skip time checks since DUT in the factory are unlikely to have reliable time.
+            root_store_builder.set_flags(X509VerifyFlags::NO_CHECK_TIME)?;
+        }
 
         let root_store = root_store_builder.build();
 
@@ -539,7 +549,7 @@ mod tests {
         let root = X509::from_pem(VALID_UDS_CHAIN[2].as_bytes()).unwrap();
         let certs = vec![root, intermediate, leaf];
         let signer = "Test Signer".to_string();
-        let result = Csr::validate_uds_cert_path(&signer, &certs);
+        let result = Csr::validate_uds_cert_path(&signer, &certs, /* is_factory= */ false);
         assert!(result.is_ok());
     }
 
@@ -556,7 +566,8 @@ mod tests {
 
         let certs = vec![invalid_root.clone(), intermediate.clone(), leaf.clone()];
         let signer = "Test Signer".to_string();
-        let error = Csr::validate_uds_cert_path(&signer, &certs).unwrap_err();
+        let error =
+            Csr::validate_uds_cert_path(&signer, &certs, /* is_factory= */ false).unwrap_err();
         assert!(error.to_string().contains("certificate signature failure"));
 
         let mut intermediates = Stack::new().unwrap();
