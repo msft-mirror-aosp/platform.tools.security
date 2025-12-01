@@ -59,6 +59,13 @@ mod ffi {
         value: bool,
     }
 
+    struct StringResult {
+        /// If non-empty, the description of the error that occurred.
+        error: String,
+        /// If [`error`] is empty, the leaf component name of the DICE chain.
+        value: String,
+    }
+
     extern "Rust" {
         type DiceChain;
 
@@ -79,8 +86,8 @@ mod ffi {
             chain2: &DiceChain,
         ) -> BoolResult;
 
-        #[cxx_name = componentNameInDiceChainContains]
-        fn component_name_in_dice_chain_contains(chain: &DiceChain, substring: &str) -> BoolResult;
+        #[cxx_name = getDiceChainLeafComponentName]
+        pub fn get_dice_chain_leaf_component_name(chain: &DiceChain) -> StringResult;
 
         #[cxx_name = hasNonNormalModeInDiceChain]
         fn has_non_normal_mode_in_dice_chain(chain: &DiceChain) -> BoolResult;
@@ -126,6 +133,15 @@ impl TryInto<Options> for ffi::DiceChainKind {
             ffi::DiceChainKind::Vsr15 => Ok(Options::vsr15()),
             ffi::DiceChainKind::Vsr16 => Ok(Options::vsr16()),
             _ => Err("invalid chain kind".to_string()),
+        }
+    }
+}
+
+impl From<Result<String, String>> for ffi::StringResult {
+    fn from(res: Result<String, String>) -> Self {
+        match res {
+            Ok(value) => ffi::StringResult { value, error: "".to_string() },
+            Err(error) => ffi::StringResult { value: "".to_string(), error },
         }
     }
 }
@@ -218,32 +234,25 @@ fn compare_root_public_key_in_dice_chain(
     }
 }
 
-fn component_name_in_dice_chain_contains(chain: &DiceChain, substring: &str) -> ffi::BoolResult {
+fn extract_leaf_component_name(chain: &DiceChain) -> Result<String, String> {
     match chain {
-        DiceChain(Some(chain)) => match chain {
-            ChainForm::Proper(chain) => {
-                match chain
-                    .payloads()
-                    .last()
-                    .expect("leaf cert was empty")
-                    .config_desc()
-                    .component_name()
-                {
-                    Some(name) => {
-                        ffi::BoolResult { error: "".to_string(), value: name.contains(substring) }
-                    }
-                    None => ffi::BoolResult {
-                        error: "component name could not be retrieved".to_string(),
-                        value: false,
-                    },
-                }
-            }
-            ChainForm::Degenerate(_) => {
-                ffi::BoolResult { error: "DICE chain is degenerate".to_string(), value: false }
-            }
+        DiceChain(Some(inner_chain)) => match inner_chain {
+            ChainForm::Proper(proper_chain) => proper_chain
+                .payloads()
+                .last()
+                .ok_or_else(|| "leaf cert was empty".to_string())?
+                .config_desc()
+                .component_name()
+                .map(|s| s.to_string())
+                .ok_or_else(|| "component name is not a string".to_string()),
+            ChainForm::Degenerate(_) => Err("DICE chain is degenerate".to_string()),
         },
-        _ => ffi::BoolResult { error: "A DICE chain must be provided".to_string(), value: false },
+        _ => Err("A DICE chain must be provided".to_string()),
     }
+}
+
+fn get_dice_chain_leaf_component_name(chain: &DiceChain) -> ffi::StringResult {
+    extract_leaf_component_name(chain).into()
 }
 
 fn has_non_normal_mode_in_dice_chain(chain: &DiceChain) -> ffi::BoolResult {

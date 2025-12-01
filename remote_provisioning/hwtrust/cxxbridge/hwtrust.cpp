@@ -85,12 +85,12 @@ Result<bool> DiceChain::compareRootPublicKey(const DiceChain& other) const noexc
     return result.value;
 }
 
-Result<bool> DiceChain::componentNameContains(std::string_view value) const noexcept {
-    auto result = rust::componentNameInDiceChainContains(**chain_, value.data());
+Result<std::string> DiceChain::leafComponentName() const noexcept {
+    auto result = rust::getDiceChainLeafComponentName(**chain_);
     if (!result.error.empty()) {
         return Error() << static_cast<std::string>(result.error);
     }
-    return result.value;
+    return std::string(result.value);
 }
 
 Result<bool> DiceChain::hasNonNormalMode() const noexcept {
