@@ -23,7 +23,7 @@ pub struct Options {
     pub allow_any_mode: bool,
     /// The RKP instance associated to the session.
     pub rkp_instance: RkpInstance,
-    /// This flag is used during DeviceInfo validation
+    /// Whether this tool is being used on DUT in the factory.
     pub is_factory: bool,
     /// Verbose output
     pub verbose: bool,

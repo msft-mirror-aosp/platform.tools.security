@@ -170,7 +170,11 @@ fn verify_dice_chain(args: &Args, sub_args: &DiceChainArgs) -> Result<Option<Str
             .map(|v| fs::read(v).context(format!("Failed to read UdsCert {v}")))
             .collect::<Result<_>>()?;
 
-        rkp::Csr::parse_and_validate_uds_certs(&chain, &[(String::from("signer"), uds_certs)])?;
+        rkp::Csr::parse_and_validate_uds_certs(
+            &chain,
+            &[(String::from("signer"), uds_certs)],
+            session.options.is_factory,
+        )?;
     }
 
     Ok(match chain {
