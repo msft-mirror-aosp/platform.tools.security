@@ -160,4 +160,11 @@ Result<bool> Csr::compareChallenge(const std::vector<uint8_t>& challenge) const 
     return result.value;
 }
 
+Result<int> DiceChain::countTrailingRkpVmMarkers() const noexcept {
+    auto result = rust::countTrailingRkpVmMarkers(**chain_);
+    if (!result.error.empty()) {
+        return Error() << static_cast<std::string>(result.error);
+    }
+    return result.value;
+}
 } // namespace hwtrust
