@@ -18,7 +18,6 @@
 constexpr size_t kMaxFileSize = 10 * 1024 * 1024;  // 10MB max to prevent OOM
 constexpr size_t kMaxBlocks = 100;  // Limit number of blocks to add
 constexpr size_t kMaxDataBlockSize = 64 * 1024;  // 64KB max per data block
-constexpr size_t kMinBlockSize = 512;
 constexpr size_t kMaxCallbackFailures = 10;  // Limit callback failure simulation
 
 // Callback context structure to track and control callback behavior
