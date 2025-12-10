@@ -41,7 +41,7 @@ public:
   // whether a certificate in the DICE chain has a non-normal mode
   Result<bool> hasNonNormalMode() const noexcept;
 
-  Result<bool> componentNameContains(std::string_view value) const noexcept;
+  Result<std::string> leafComponentName() const noexcept;
 
   bool IsProper() const noexcept;
 
