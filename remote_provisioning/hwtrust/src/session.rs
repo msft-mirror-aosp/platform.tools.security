@@ -23,7 +23,7 @@ pub struct Options {
     pub allow_any_mode: bool,
     /// The RKP instance associated to the session.
     pub rkp_instance: RkpInstance,
-    /// Whether this tool is being used on DUT in the factory.
+    /// Skips checks that wouldn't necessarily be expected to pass on DUT in the factory.
     pub is_factory: bool,
     /// Verbose output
     pub verbose: bool,
