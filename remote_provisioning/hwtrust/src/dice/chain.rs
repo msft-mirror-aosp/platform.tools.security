@@ -35,8 +35,13 @@ pub struct Chain {
     payloads: Vec<Payload>,
 }
 
+/// Represents an error that occurred during the structural validation of a DICE chain.
+///
+/// This error indicates that the chain of certificates is malformed, for example,
+/// due to a mismatched issuer/subject link, reuse of a key, or an invalid sequence
+/// of RKP VM markers.
 #[derive(Error, Debug, PartialEq, Eq)]
-pub(crate) enum ValidationError {
+pub enum ValidationError {
     #[error("no payloads")]
     NoPayloads,
     #[error("issuer `{1}` is not previous subject `{2}` in payload {0}")]
@@ -138,6 +143,40 @@ impl Chain {
     pub fn leaf(&self) -> &Payload {
         // There is always at least one payload.
         self.payloads.last().unwrap()
+    }
+
+    /// Returns the count of trailing RKP VM markers at the end of the DICE chain.
+    ///
+    /// This function searches for the first certificate with an RKP VM marker. If one is
+    /// found, it validates that all subsequent certificates, up to and include the leaf,
+    /// also contain RKP VM markers. If this sequence of markers is contiguous to the chain's
+    /// end, the function returns the length of that sequence.
+    ///
+    /// If a non-marker certificate breaks a sequence of markers, and is later followed by another
+    /// marker, an `Err(ValidationError::RkpVmChainHasDiscontinuousMarker)` is returned.
+    ///
+    /// If no RKP VM markers are found, or if the sequence of markers does not extend to the
+    /// leaf (i.e., it's interrupted by a non-marker at the end), this function returns 0.
+    pub fn count_trailing_rkp_vm_markers(&self) -> Result<usize, ValidationError> {
+        let Some(start_idx) = self.payloads.iter().position(|p| p.has_rkpvm_marker()) else {
+            return Ok(0);
+        };
+
+        let mut rkpvm_marker_count = 0;
+        let mut seen_non_marker = false;
+        for (i, payload) in self.payloads.iter().enumerate().skip(start_idx) {
+            if payload.has_rkpvm_marker() {
+                if seen_non_marker {
+                    return Err(ValidationError::RkpVmChainHasDiscontinuousMarker(i));
+                }
+                rkpvm_marker_count += 1;
+            } else {
+                seen_non_marker = true;
+                rkpvm_marker_count = 0;
+            }
+        }
+
+        Ok(rkpvm_marker_count)
     }
 }
 
@@ -410,6 +449,122 @@ mod tests {
         ];
         let err = Chain::validate(root_public_key, payloads, RkpInstance::Avf).unwrap_err();
         assert_eq!(err, ValidationError::RkpVmChainHasDiscontinuousMarker(2));
+    }
+
+    #[test]
+    fn count_trailing_markers_returns_zero_with_no_markers_at_all() {
+        let root_public_key = PrivateKey::from_pem(P256_KEY_PEM[0]).public_key();
+        let config_no_marker = ConfigDescBuilder::new().rkp_vm_marker(false).build();
+
+        let payloads = vec![
+            valid_payload(0, P256_KEY_PEM[1])
+                .config_desc(config_no_marker.clone())
+                .build()
+                .unwrap(),
+            valid_payload(1, P256_KEY_PEM[2])
+                .config_desc(config_no_marker.clone())
+                .build()
+                .unwrap(),
+        ];
+        let chain = Chain::validate(root_public_key, payloads, RkpInstance::Default).unwrap();
+        assert_eq!(chain.count_trailing_rkp_vm_markers().unwrap(), 0);
+    }
+
+    #[test]
+    fn count_trailing_markers_returns_error_for_discontinuous_chain() {
+        let root_public_key = PrivateKey::from_pem(P256_KEY_PEM[0]).public_key();
+        let config_with_marker = ConfigDescBuilder::new().rkp_vm_marker(true).build();
+        let config_no_marker = ConfigDescBuilder::new().rkp_vm_marker(false).build();
+
+        let payloads = vec![
+            valid_payload(0, P256_KEY_PEM[1])
+                .config_desc(config_with_marker.clone())
+                .build()
+                .unwrap(),
+            valid_payload(1, P256_KEY_PEM[2])
+                .config_desc(config_no_marker.clone())
+                .build()
+                .unwrap(),
+            valid_payload(2, P256_KEY_PEM[3])
+                .config_desc(config_with_marker.clone())
+                .build()
+                .unwrap(),
+        ];
+        let chain = Chain::validate(root_public_key, payloads, RkpInstance::Default).unwrap();
+        let result = chain.count_trailing_rkp_vm_markers();
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), ValidationError::RkpVmChainHasDiscontinuousMarker(2));
+    }
+
+    #[test]
+    fn count_trailing_markers_returns_zero_with_non_marker_at_end() {
+        let root_public_key = PrivateKey::from_pem(P256_KEY_PEM[0]).public_key();
+        let config_with_marker = ConfigDescBuilder::new().rkp_vm_marker(true).build();
+        let config_no_marker = ConfigDescBuilder::new().rkp_vm_marker(false).build();
+
+        let payloads = vec![
+            valid_payload(0, P256_KEY_PEM[1])
+                .config_desc(config_with_marker.clone())
+                .build()
+                .unwrap(),
+            valid_payload(1, P256_KEY_PEM[2])
+                .config_desc(config_with_marker.clone())
+                .build()
+                .unwrap(),
+            valid_payload(2, P256_KEY_PEM[3])
+                .config_desc(config_no_marker.clone())
+                .build()
+                .unwrap(),
+        ];
+        let chain = Chain::validate(root_public_key, payloads, RkpInstance::Default).unwrap();
+        assert_eq!(chain.count_trailing_rkp_vm_markers().unwrap(), 0);
+    }
+
+    #[test]
+    fn count_trailing_markers_succeeds_with_trailing_sequence() {
+        let root_public_key = PrivateKey::from_pem(P256_KEY_PEM[0]).public_key();
+        let config_with_marker = ConfigDescBuilder::new().rkp_vm_marker(true).build();
+        let config_no_marker = ConfigDescBuilder::new().rkp_vm_marker(false).build();
+
+        let payloads = vec![
+            valid_payload(0, P256_KEY_PEM[1])
+                .config_desc(config_no_marker.clone())
+                .build()
+                .unwrap(),
+            valid_payload(1, P256_KEY_PEM[2])
+                .config_desc(config_with_marker.clone())
+                .build()
+                .unwrap(),
+            valid_payload(2, P256_KEY_PEM[3])
+                .config_desc(config_with_marker.clone())
+                .build()
+                .unwrap(),
+        ];
+        let chain = Chain::validate(root_public_key, payloads, RkpInstance::Avf).unwrap();
+        assert_eq!(chain.count_trailing_rkp_vm_markers().unwrap(), 2);
+    }
+
+    #[test]
+    fn count_trailing_markers_succeeds_with_all_markers() {
+        let root_public_key = PrivateKey::from_pem(P256_KEY_PEM[0]).public_key();
+        let config_with_marker = ConfigDescBuilder::new().rkp_vm_marker(true).build();
+
+        let payloads = vec![
+            valid_payload(0, P256_KEY_PEM[1])
+                .config_desc(config_with_marker.clone())
+                .build()
+                .unwrap(),
+            valid_payload(1, P256_KEY_PEM[2])
+                .config_desc(config_with_marker.clone())
+                .build()
+                .unwrap(),
+            valid_payload(2, P256_KEY_PEM[3])
+                .config_desc(config_with_marker.clone())
+                .build()
+                .unwrap(),
+        ];
+        let chain = Chain::validate(root_public_key, payloads, RkpInstance::Avf).unwrap();
+        assert_eq!(chain.count_trailing_rkp_vm_markers().unwrap(), 3);
     }
 
     fn valid_payload(index: usize, pem: &str) -> PayloadBuilder {

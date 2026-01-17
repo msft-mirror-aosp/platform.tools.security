@@ -7,6 +7,7 @@ use hwtrust::dice::DiceMode;
 use hwtrust::dice::ProfileVersion;
 use hwtrust::rkp::Csr as InnerCsr;
 use hwtrust::session::{DiceProfileRange, Options, RkpInstance, Session};
+use std::convert::TryInto;
 use std::str::FromStr;
 
 /// Since the AVF DICE chain combines both vendor and AOSP DICE chains, the chain doesn't rely
@@ -66,6 +67,13 @@ mod ffi {
         value: String,
     }
 
+    struct IntResult {
+        /// If non-empty, the description of the error that occurred.
+        error: String,
+        /// If [`error`] is empty, the count of trailing RKP VM markers.
+        value: i32,
+    }
+
     extern "Rust" {
         type DiceChain;
 
@@ -120,6 +128,9 @@ mod ffi {
 
         #[cxx_name = compareChallengeInCsr]
         fn compare_challenge_in_csr(csr: &Csr, challenge: &[u8]) -> BoolResult;
+
+        #[cxx_name = countTrailingRkpVmMarkers]
+        fn count_trailing_rkp_vm_markers(chain: &DiceChain) -> IntResult;
     }
 }
 
@@ -356,5 +367,22 @@ fn compare_challenge_in_csr(csr: &Csr, challenge: &[u8]) -> ffi::BoolResult {
             ffi::BoolResult { error: "".to_string(), value: challenge == csr.challenge() }
         }
         _ => ffi::BoolResult { error: "challenge could not be compared".to_string(), value: false },
+    }
+}
+
+fn count_trailing_rkp_vm_markers(chain: &DiceChain) -> ffi::IntResult {
+    match &chain.0 {
+        Some(ChainForm::Proper(proper_chain)) => {
+            match proper_chain.count_trailing_rkp_vm_markers() {
+                Ok(count) => {
+                    ffi::IntResult { error: "".to_string(), value: count.try_into().unwrap() }
+                }
+                Err(e) => ffi::IntResult { error: format!("{e:#}"), value: 0 },
+            }
+        }
+        Some(ChainForm::Degenerate(_)) => ffi::IntResult { error: "".to_string(), value: 0 },
+        None => {
+            ffi::IntResult { error: "A valid DICE chain must be provided.".to_string(), value: 0 }
+        }
     }
 }
