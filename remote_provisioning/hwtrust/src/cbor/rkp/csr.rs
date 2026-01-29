@@ -312,7 +312,14 @@ impl Csr {
         let root = certs_copy.pop().unwrap();
 
         let mut root_store_builder = X509StoreBuilder::new()?;
-        root_store_builder.add_cert(root)?;
+        root_store_builder.add_cert(root.clone())?;
+
+        // If the chain does not have a root certificate, allow verification to pass with a partial
+        // chain.
+        if std::cmp::Ordering::Equal != root.subject_name().try_cmp(root.issuer_name())? {
+            root_store_builder.set_flags(X509VerifyFlags::PARTIAL_CHAIN)?;
+        }
+
         // Setting this flag causes the signature on the root certificate to be checked.
         // This ensures that the root certificate has not been corrupted.
         root_store_builder.set_flags(X509VerifyFlags::CHECK_SS_SIGNATURE)?;
@@ -579,6 +586,62 @@ mod tests {
 
         let mut context = X509StoreContext::new().unwrap();
         assert!(context.init(&store, &leaf, &intermediates, |c| c.verify_cert()).unwrap());
+    }
+
+    const VALID_DESKTOP_UDS_CHAIN: &[&str] = &[
+        "-----BEGIN CERTIFICATE-----\n\
+    MIIEDjCCAvagAwIBAgIBAjANBgkqhkiG9w0BAQUFADB9MRgwFgYDVQQDEw9Qcml2\n\
+    YWN5IENBIFJvb3QxEjAQBgNVBAsTCUNocm9tZSBPUzETMBEGA1UEChMKR29vZ2xl\n\
+    IEluYzEWMBQGA1UEBxMNTW91bnRhaW4gVmlldzETMBEGA1UECBMKQ2FsaWZvcm5p\n\
+    YTELMAkGA1UEBhMCVVMwHhcNMjExMTI5MjAzOTAyWhcNNDExMTI5MDgwMDAwWjCB\n\
+    hTEgMB4GA1UEAxMXUHJpdmFjeSBDQSBJbnRlcm1lZGlhdGUxEjAQBgNVBAsTCUNo\n\
+    cm9tZSBPUzETMBEGA1UEChMKR29vZ2xlIEluYzEWMBQGA1UEBxMNTW91bnRhaW4g\n\
+    VmlldzETMBEGA1UECBMKQ2FsaWZvcm5pYTELMAkGA1UEBhMCVVMwggEiMA0GCSqG\n\
+    SIb3DQEBAQUAA4IBDwAwggEKAoIBAQDI/cOanfkg+ynNUHK38JAQTj0dzfnHzTk4\n\
+    1vF7Wh9D4ghGSI9bi65f78EqAJFA9mS2LAimOBxZ8WqOO5oXkcU3x4Spa/sZmH97\n\
+    i/5qPvmZ3BDWqtTaOucs7Vj8QFySnCuOTfcrhN82arKDcq5tgFD/OGOg5z/qaG9L\n\
+    tHWbtnljqwkoxSPyszpFI+RVo5Vn1qfwesuspxUfTg01czWsR37qIj2XHIoo57X1\n\
+    p4e/dCeb79pQqH4WedHfY3GUSRXvCYp5wkw9q21IL2tbUlv/6RGVZ39yRYHaM83w\n\
+    IyW9NM9ELjq2B9cM8JaCT8RzbJKk0GNO58Zbl+g3JfmSIGJCaPhzAgMBAAGjgY8w\n\
+    gYwwKQYDVR0OBCIEIPQgttnYYvaLCRXOi1ek/FdOuMF8pfnmVtvQUpQpvW1/MCsG\n\
+    A1UdIwQkMCKAIEsdFIqlOAk4gS7Wp2P13CwxhhDV+pYE1gnLLg2M7DKJMA4GA1Ud\n\
+    DwEB/wQEAwIBBjAPBgNVHRMBAf8EBTADAQH/MBEGA1UdIAQKMAgwBgYEVR0gADAN\n\
+    BgkqhkiG9w0BAQUFAAOCAQEAQWwOL0MGh6glrPoHivjZIEV54XF/haCgTtmUthMK\n\
+    b32+pcO/opkNs2IHkOI/I84Cy/oAKEmSy5PBSv1LU1lvd+Hux/GiB9HGxmGMWW9I\n\
+    CHApq53SJmxwsS/OmBAL241Yz85YdggCYpTNtRVUMN6XZ/HwIouNjsccC3vwaUo3\n\
+    Qu+nzu97rHYFJlMY2jZcYwluOU/tlzWcUN4MyGpzRbmAEv9dH3lNyEvnp6WCrgSv\n\
+    pqBWND4rYgQk+YFQ0e6VXbnLlnbjOMnz4M0N9dymiGLPT3dVYKT7hO0ryN5H2HFt\n\
+    BJpRtL4IBogH+7FPNHUJuQQZdzaqcs4nHLUNE0iQnM6rAQ==\n\
+    -----END CERTIFICATE-----",
+        "-----BEGIN CERTIFICATE-----\n\
+    MIIDAjCCAeqgAwIBAgIWAZuyg39dqSszHschGMoAAAAAAAAA0jANBgkqhkiG9w0B\n\
+    AQsFADCBhTEgMB4GA1UEAxMXUHJpdmFjeSBDQSBJbnRlcm1lZGlhdGUxEjAQBgNV\n\
+    BAsTCUNocm9tZSBPUzETMBEGA1UEChMKR29vZ2xlIEluYzEWMBQGA1UEBxMNTW91\n\
+    bnRhaW4gVmlldzETMBEGA1UECBMKQ2FsaWZvcm5pYTELMAkGA1UEBhMCVVMwHhcN\n\
+    MjYwMTEyMTkwMTUwWhcNNDYwMTEyMTkwMTUwWjAzMTEwLwYDVQQFEyg5ZmMyOGM1\n\
+    MTEyYjE4MzNjZjgxNTU2MGNlMDQ5NjgzYWU3N2UzMTU0MFkwEwYHKoZIzj0CAQYI\n\
+    KoZIzj0DAQcDQgAEkkbAqZsW483/VcZJNwA9uvoH6MBstFMhuYiYEXTJnMfbzfTd\n\
+    d4tqorH7toSdY7O9yk8SVx52WwNBa1OTxDxppqOBgzCBgDAdBgNVHQ4EFgQUn8KM\n\
+    URKxgzz4FVYM4EloOud+MVQwKwYDVR0jBCQwIoAg9CC22dhi9osJFc6LV6T8V064\n\
+    wXyl+eZW29BSlCm9bX8wDgYDVR0PAQH/BAQDAgIEMA8GA1UdEwEB/wQFMAMBAf8w\n\
+    EQYDVR0gBAowCDAGBgRVHSAAMA0GCSqGSIb3DQEBCwUAA4IBAQAj57fpET8Q2cNo\n\
+    fomJ1aOW+6B8b19MBYTYMj4MxIlFUw9Hygo7Cf7ZvVSAf76D67KS/0L4e1NIZ4/q\n\
+    kNPt9urAyPA2xoovRbjAd4jpkuHqo38Mto7fxELjJgoCFob+xNnVPOlMry6sCwhp\n\
+    CgvWEETI7KBNBcQ5H14X4LElnlIIB91b3lCUqq/gOQJM50hECgXKJaxAVfkNr0iX\n\
+    0ZVSWybzKQpmClOse+12+f9zzr+rdYVnOB8rGsrHWPINmEpJxksWujZk44ubNfmC\n\
+    szN1jjD15Y6wl9eyxyFM04D9jOObm0lfp/Mtg1D2mwZUI3zQoPPHiAPc0tZZOMW+\n\
+    Xi/PJlMI\n\
+    -----END CERTIFICATE-----",
+    ];
+
+    #[test]
+    fn verify_a_valid_desktop_uds_cert_chain() {
+        let intermediate = X509::from_pem(VALID_DESKTOP_UDS_CHAIN[0].as_bytes()).unwrap();
+        let leaf = X509::from_pem(VALID_DESKTOP_UDS_CHAIN[1].as_bytes()).unwrap();
+        let certs = vec![intermediate, leaf];
+        let signer = "Test Signer".to_string();
+        let result = Csr::validate_uds_cert_path(&signer, &certs, /* is_factory= */ false);
+        assert!(result.is_ok());
     }
 }
 
