@@ -5,6 +5,7 @@ use coset::CborSerializable;
 use hwtrust::dice::ChainForm;
 use hwtrust::dice::DiceMode;
 use hwtrust::dice::ProfileVersion;
+use hwtrust::dice::TrailingRkpVmMarker;
 use hwtrust::rkp::Csr as InnerCsr;
 use hwtrust::session::{DiceProfileRange, Options, RkpInstance, Session};
 use std::convert::TryInto;
@@ -374,9 +375,16 @@ fn count_trailing_rkp_vm_markers(chain: &DiceChain) -> ffi::IntResult {
     match &chain.0 {
         Some(ChainForm::Proper(proper_chain)) => {
             match proper_chain.count_trailing_rkp_vm_markers() {
-                Ok(count) => {
-                    ffi::IntResult { error: "".to_string(), value: count.try_into().unwrap() }
-                }
+                Ok(marker_state) => match marker_state {
+                    TrailingRkpVmMarker::None => ffi::IntResult { error: "".to_string(), value: 0 },
+                    TrailingRkpVmMarker::ContinuousToLeaf(count) => {
+                        ffi::IntResult { error: "".to_string(), value: count.try_into().unwrap() }
+                    }
+                    TrailingRkpVmMarker::ContinuousNotToLeaf => ffi::IntResult {
+                        error: "RKP VM markers do not extend to the leaf".to_string(),
+                        value: 0,
+                    },
+                },
                 Err(e) => ffi::IntResult { error: format!("{e:#}"), value: 0 },
             }
         }
