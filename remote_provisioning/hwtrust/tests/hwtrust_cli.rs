@@ -52,6 +52,15 @@ fn factory_csr_widevine_v19_profile_succeeds() {
 }
 
 #[test]
+fn factory_csr_widevine_v20_profile_succeeds() {
+    let output = Command::new(hwtrust_bin())
+        .args(["factory-csr", "testdata/factory_csr/widevine_v20_profile_csr.json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+}
+
+#[test]
 fn factory_csr_one_invalid_csr_of_multiple_fails() {
     let output = Command::new(hwtrust_bin())
         .args(["factory-csr", "testdata/factory_csr/all_versions_invalid.json"])
