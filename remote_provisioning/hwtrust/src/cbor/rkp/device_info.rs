@@ -174,7 +174,7 @@ impl DeviceInfo {
         match string.len() {
             8 => match NaiveDate::parse_from_str(string, "%Y%m%d") {
                 Ok(_) => Ok(()),
-                Err(e) => bail!("Error parsing {key}:{}: {}", level.unwrap(), e.to_string()),
+                Err(e) => bail!("Error parsing {key}:{}: {}", level.unwrap(), e),
             },
             _ => bail!(
                 "value for {key} must be in format YYYYMMDD or YYYYMM, found: '{}'",
