@@ -74,10 +74,8 @@ pub enum ValidationError {
          Minimal marker number:{RKPVM_CHAIN_MIN_MARKER_NUM}, actual marker number:{0}"
     )]
     NotEnoughRkpVmMarker(usize),
-    #[error(
-        "For an RKP VM instance, the chain of markers must be continuous to the leaf certificate."
-    )]
-    RkpVmMarkerNotContinuousToLeaf,
+    #[error("non RKP VM chain should not have continuous RKP VM markers")]
+    UnexpectedRkpVmMarkers,
 }
 
 impl ChainForm {
@@ -102,6 +100,13 @@ impl Chain {
     /// equal to the subject of the previous entry. The chain is not allowed to contain any
     /// repeated subjects or subject public keys as that would suggest something untoward has
     /// happened.
+    ///
+    /// Additionally, `rkp_instance` provides additional context for the validation of the chain
+    /// according to the instance-specific chain validation rules.
+    ///
+    /// * AVF instance: The chain is validated against the RKP VM chain validation rules.
+    /// * Non-AVF instances: The chain must not contain RKP VM markers that conform to the RKP VM
+    ///   chain validation rules.
     pub(crate) fn validate(
         root_public_key: PublicKey,
         payloads: Vec<Payload>,
@@ -134,36 +139,11 @@ impl Chain {
             }
             previous_subject = Some(payload.subject());
         }
-
-        let chain = Self { root_public_key, payloads };
-        let marker_state = chain.count_trailing_rkp_vm_markers()?;
-        Self::validate_rkp_vm_marker_policy(&rkp_instance, &marker_state)?;
-        Ok(chain)
-    }
-
-    fn validate_rkp_vm_marker_policy(
-        rkp_instance: &RkpInstance,
-        marker_state: &TrailingRkpVmMarker,
-    ) -> Result<(), ValidationError> {
-        match (rkp_instance, marker_state) {
-            (_, TrailingRkpVmMarker::ContinuousToLeaf(count)) => {
-                if *count >= RKPVM_CHAIN_MIN_MARKER_NUM {
-                    Ok(())
-                } else {
-                    Err(ValidationError::NotEnoughRkpVmMarker(*count))
-                }
-            }
-
-            (RkpInstance::Avf, TrailingRkpVmMarker::None) => {
-                Err(ValidationError::NotEnoughRkpVmMarker(0))
-            }
-
-            (RkpInstance::Avf, TrailingRkpVmMarker::ContinuousNotToLeaf) => {
-                Err(ValidationError::RkpVmMarkerNotContinuousToLeaf)
-            }
-
-            _ => Ok(()),
-        }
+        match rkp_instance {
+            RkpInstance::Avf => validate_rkpvm_chain(&payloads),
+            _ => validate_non_rkpvm_chain(&payloads),
+        }?;
+        Ok(Self { root_public_key, payloads })
     }
 
     /// Get the root public key which verifies the first certificate in the chain.
@@ -220,6 +200,30 @@ impl Chain {
             Ok(TrailingRkpVmMarker::ContinuousNotToLeaf)
         }
     }
+}
+
+fn validate_rkpvm_chain(payloads: &[Payload]) -> Result<(), ValidationError> {
+    let mut rkpvm_marker_count = 0;
+    for (i, payload) in payloads.iter().enumerate() {
+        if payload.has_rkpvm_marker() {
+            rkpvm_marker_count += 1;
+        } else if rkpvm_marker_count > 0 {
+            return Err(ValidationError::RkpVmChainHasDiscontinuousMarker(i));
+        }
+    }
+    if rkpvm_marker_count < RKPVM_CHAIN_MIN_MARKER_NUM {
+        return Err(ValidationError::NotEnoughRkpVmMarker(rkpvm_marker_count));
+    }
+    Ok(())
+}
+
+/// Validates a DICE chain that is not associated with an RKP VM.
+///
+/// While non-RKP VM DICE chains might contain RKP VM markers in some vendor DICE certificates
+/// (e.g., Microdroid pVM DICE chain), they should not have a continuous presence of markers up to
+/// the last certificate in the chain.
+fn validate_non_rkpvm_chain(payloads: &[Payload]) -> Result<(), ValidationError> {
+    validate_rkpvm_chain(payloads).map_or(Ok(()), |_| Err(ValidationError::UnexpectedRkpVmMarkers))
 }
 
 impl Display for Chain {
@@ -399,7 +403,7 @@ mod tests {
     }
 
     #[test]
-    fn non_rkpvm_chain_validate_succeeds_with_continuous_markers() {
+    fn non_rkpvm_chain_validate_fails_with_continuous_markers() {
         let root_public_key = PrivateKey::from_pem(P256_KEY_PEM[0]).public_key();
         let config_desc = ConfigDescBuilder::new().rkp_vm_marker(true).build();
         let payloads = vec![
@@ -407,7 +411,8 @@ mod tests {
             valid_payload(1, P256_KEY_PEM[2]).config_desc(config_desc.clone()).build().unwrap(),
             valid_payload(2, P256_KEY_PEM[3]).config_desc(config_desc.clone()).build().unwrap(),
         ];
-        Chain::validate(root_public_key, payloads, RkpInstance::Default).unwrap();
+        let err = Chain::validate(root_public_key, payloads, RkpInstance::Default).unwrap_err();
+        assert_eq!(err, ValidationError::UnexpectedRkpVmMarkers);
     }
 
     #[test]
@@ -452,7 +457,7 @@ mod tests {
             valid_payload(2, P256_KEY_PEM[3]).config_desc(config_desc.clone()).build().unwrap(),
         ];
         let err = Chain::validate(root_public_key, payloads, RkpInstance::Avf).unwrap_err();
-        assert_eq!(err, ValidationError::RkpVmChainHasDiscontinuousMarker(2));
+        assert_eq!(err, ValidationError::RkpVmChainHasDiscontinuousMarker(1));
     }
 
     #[test]
@@ -465,7 +470,7 @@ mod tests {
             valid_payload(2, P256_KEY_PEM[3]).build().unwrap(),
         ];
         let err = Chain::validate(root_public_key, payloads, RkpInstance::Avf).unwrap_err();
-        assert_eq!(err, ValidationError::RkpVmMarkerNotContinuousToLeaf);
+        assert_eq!(err, ValidationError::RkpVmChainHasDiscontinuousMarker(2));
     }
 
     #[test]
@@ -507,7 +512,9 @@ mod tests {
                 .build()
                 .unwrap(),
         ];
-        let result = Chain::validate(root_public_key, payloads, RkpInstance::Default);
+        let chain = Chain::validate(root_public_key, payloads, RkpInstance::Default).unwrap();
+        let result = chain.count_trailing_rkp_vm_markers();
+        assert!(result.is_err());
         assert_eq!(result.unwrap_err(), ValidationError::RkpVmChainHasDiscontinuousMarker(2));
     }
 
