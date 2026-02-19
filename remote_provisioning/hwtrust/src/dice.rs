@@ -4,7 +4,7 @@ mod chain;
 mod entry;
 mod profile;
 
-pub use chain::{Chain, ChainForm, DegenerateChain};
+pub use chain::{Chain, ChainForm, DegenerateChain, TrailingRkpVmMarker};
 pub use entry::{ComponentVersion, ConfigDesc, DiceMode, Payload};
 pub(crate) use entry::{ConfigDescBuilder, PayloadBuilder};
 pub use profile::ProfileVersion;

@@ -35,6 +35,23 @@ pub struct Chain {
     payloads: Vec<Payload>,
 }
 
+/// The state of trailing RKP VM markers in a DICE chain.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TrailingRkpVmMarker {
+    /// No RKP VM markers were found anywhere in the DICE chain.
+    None,
+    /// A continuous sequence of RKP VM markers was found that extends
+    /// all the way to, and includes, the leaf certificate.
+    ///
+    /// The associated `usize` value is the number of markers in this
+    /// continuous trailing sequence.
+    ContinuousToLeaf(usize),
+    /// A continuous sequence of RKP VM markers was found, but the
+    /// sequence is interrupted by one or more non-marker certificates
+    /// at the end of the chain (i.e., the leaf certificate does not have a marker).
+    ContinuousNotToLeaf,
+}
+
 /// Represents an error that occurred during the structural validation of a DICE chain.
 ///
 /// This error indicates that the chain of certificates is malformed, for example,
@@ -145,24 +162,25 @@ impl Chain {
         self.payloads.last().unwrap()
     }
 
-    /// Returns the count of trailing RKP VM markers at the end of the DICE chain.
+    /// Analyzes the RKP VM markers in the DICE chain to determine their trailing state.
     ///
-    /// This function searches for the first certificate with an RKP VM marker. If one is
-    /// found, it validates that all subsequent certificates, up to and include the leaf,
-    /// also contain RKP VM markers. If this sequence of markers is contiguous to the chain's
-    /// end, the function returns the length of that sequence.
+    /// This function checks for a continuous sequence of RKP VM markers at the end of the chain.
     ///
-    /// If a non-marker certificate breaks a sequence of markers, and is later followed by another
-    /// marker, an `Err(ValidationError::RkpVmChainHasDiscontinuousMarker)` is returned.
-    ///
-    /// If no RKP VM markers are found, or if the sequence of markers does not extend to the
-    /// leaf (i.e., it's interrupted by a non-marker at the end), this function returns 0.
-    pub fn count_trailing_rkp_vm_markers(&self) -> Result<usize, ValidationError> {
+    /// Returns:
+    /// * `Ok(TrailingRkpVmMarker::None)`: If no RKP VM markers are found in the chain.
+    /// * `Ok(TrailingRkpVmMarker::ContinuousToLeaf(count))`: If there is a continuous sequence
+    ///   of `count` RKP VM markers up to and including the leaf certificate.
+    /// * `Ok(TrailingRkpVmMarker::ContinuousNotToLeaf)`: If the last marker found is not in the
+    ///   leaf certificate (i.e., the sequence breaks before the end).
+    /// * `Err(ValidationError::RkpVmChainHasDiscontinuousMarker)`: If a non-marker is found
+    ///   *between* RKP VM markers, indicating a broken sequence.
+    pub fn count_trailing_rkp_vm_markers(&self) -> Result<TrailingRkpVmMarker, ValidationError> {
         let Some(start_idx) = self.payloads.iter().position(|p| p.has_rkpvm_marker()) else {
-            return Ok(0);
+            return Ok(TrailingRkpVmMarker::None);
         };
 
         let mut rkpvm_marker_count = 0;
+        let mut last_marker_idx = start_idx;
         let mut seen_non_marker = false;
         for (i, payload) in self.payloads.iter().enumerate().skip(start_idx) {
             if payload.has_rkpvm_marker() {
@@ -170,13 +188,17 @@ impl Chain {
                     return Err(ValidationError::RkpVmChainHasDiscontinuousMarker(i));
                 }
                 rkpvm_marker_count += 1;
+                last_marker_idx = i;
             } else {
                 seen_non_marker = true;
-                rkpvm_marker_count = 0;
             }
         }
 
-        Ok(rkpvm_marker_count)
+        if last_marker_idx == self.payloads.len() - 1 {
+            Ok(TrailingRkpVmMarker::ContinuousToLeaf(rkpvm_marker_count))
+        } else {
+            Ok(TrailingRkpVmMarker::ContinuousNotToLeaf)
+        }
     }
 }
 
@@ -467,7 +489,7 @@ mod tests {
                 .unwrap(),
         ];
         let chain = Chain::validate(root_public_key, payloads, RkpInstance::Default).unwrap();
-        assert_eq!(chain.count_trailing_rkp_vm_markers().unwrap(), 0);
+        assert_eq!(chain.count_trailing_rkp_vm_markers().unwrap(), TrailingRkpVmMarker::None);
     }
 
     #[test]
@@ -497,7 +519,7 @@ mod tests {
     }
 
     #[test]
-    fn count_trailing_markers_returns_zero_with_non_marker_at_end() {
+    fn count_trailing_markers_succeeds_with_non_marker_at_end() {
         let root_public_key = PrivateKey::from_pem(P256_KEY_PEM[0]).public_key();
         let config_with_marker = ConfigDescBuilder::new().rkp_vm_marker(true).build();
         let config_no_marker = ConfigDescBuilder::new().rkp_vm_marker(false).build();
@@ -517,7 +539,10 @@ mod tests {
                 .unwrap(),
         ];
         let chain = Chain::validate(root_public_key, payloads, RkpInstance::Default).unwrap();
-        assert_eq!(chain.count_trailing_rkp_vm_markers().unwrap(), 0);
+        assert_eq!(
+            chain.count_trailing_rkp_vm_markers().unwrap(),
+            TrailingRkpVmMarker::ContinuousNotToLeaf
+        );
     }
 
     #[test]
@@ -541,7 +566,10 @@ mod tests {
                 .unwrap(),
         ];
         let chain = Chain::validate(root_public_key, payloads, RkpInstance::Avf).unwrap();
-        assert_eq!(chain.count_trailing_rkp_vm_markers().unwrap(), 2);
+        assert_eq!(
+            chain.count_trailing_rkp_vm_markers().unwrap(),
+            TrailingRkpVmMarker::ContinuousToLeaf(2)
+        );
     }
 
     #[test]
@@ -564,7 +592,10 @@ mod tests {
                 .unwrap(),
         ];
         let chain = Chain::validate(root_public_key, payloads, RkpInstance::Avf).unwrap();
-        assert_eq!(chain.count_trailing_rkp_vm_markers().unwrap(), 3);
+        assert_eq!(
+            chain.count_trailing_rkp_vm_markers().unwrap(),
+            TrailingRkpVmMarker::ContinuousToLeaf(3)
+        );
     }
 
     fn valid_payload(index: usize, pem: &str) -> PayloadBuilder {
