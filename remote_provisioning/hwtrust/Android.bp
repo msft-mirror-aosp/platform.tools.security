@@ -41,6 +41,7 @@ rust_library {
     apex_available: [
         "//apex_available:platform",
         "com.android.compos",
+        "com.android.sdv.*",
         "com.android.virt",
     ],
     min_sdk_version: "35",
