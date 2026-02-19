@@ -1,0 +1,37 @@
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+    default_team: "trendy_team_attack_tools",
+}
+
+cc_fuzz {
+    name: "imsmedia_rtp_fuzzer_orphaned",
+    defaults: ["imsmedia_fuzz_defaults_orphaned"],
+    srcs: ["rtp_fuzzer.cpp"],
+
+    fuzz_config: {
+        componentid: 825342,
+
+        hotlists: [
+            "3705175",
+            "7826148",
+        ],
+
+        vector: "remote",
+        fuzzed_code_usage: "shipped",
+        service_privilege: "privileged",
+        users: "multi_user",
+
+        cc: ["martijnbogaard@google.com"],
+
+        acknowledgement: [
+            "Martijn Bogaard of Google",
+        ],
+
+        fuzz_on_haiku_host: true,
+        fuzz_on_haiku_device: true,
+
+        // Email overriding default ISE assignment of bugs. Only use this field if
+        // fuzzer should not be triaged by ISE, for example during fuzzer testing.
+        triage_assignee: "martijnbogaard@google.com",
+    },
+}

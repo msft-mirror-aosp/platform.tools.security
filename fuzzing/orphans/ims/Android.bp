@@ -1,0 +1,58 @@
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+    default_team: "trendy_team_attack_tools",
+}
+
+filegroup {
+    name: "imsmedia_orphaned_wrappers",
+    srcs: [
+        "wrappers/ProtocolWrapper.cpp",
+        "wrappers/TraceWrapper.cpp",
+        "wrappers/MockImsMediaAnomalyReporter.cpp",
+    ],
+}
+
+cc_defaults {
+    name: "imsmedia_fuzz_defaults_orphaned",
+    host_supported: true,
+    srcs: [
+        ":imsmedia_orphaned_wrappers",
+    ],
+    shared_libs: [
+        "liblog",
+        "libutils",
+    ],
+    static_libs: [
+        "libcutils",
+    ],
+    include_dirs: [
+        "vendor/google/services/ImsMedia/service/src/com/android/telephony/imsmedia/lib/libimsmedia/protocol/include/rtp/core",
+        "vendor/google/services/ImsMedia/service/src/com/android/telephony/imsmedia/lib/libimsmedia/protocol/include/rtp/utils",
+        "vendor/google/services/ImsMedia/service/src/com/android/telephony/imsmedia/lib/libimsmedia/protocol/interface/rtp",
+        "vendor/google/services/ImsMedia/service/src/com/android/telephony/imsmedia/lib/libimsmedia/core/interface/utils",
+        "vendor/google/services/ImsMedia/service/src/com/android/telephony/imsmedia/lib/libimsmedia/core/include",
+        "vendor/google/services/ImsMedia/service/src/com/android/telephony/imsmedia/lib/libimsmedia/core/include/nodes",
+        "vendor/google/services/ImsMedia/service/src/com/android/telephony/imsmedia/lib/libimsmedia/core/include/utils",
+        "vendor/google/services/ImsMedia/service/src/com/android/telephony/imsmedia/lib/libimsmedia/core/include/metrics",
+        "vendor/google/services/ImsMedia/service/src/com/android/telephony/imsmedia/lib/libimsmedia/protocol",
+        "vendor/google/services/ImsMedia/service/src/com/android/telephony/imsmedia/lib/libimsmedia/core/utils",
+        "frameworks/native/include",
+        "frameworks/native/libs/binder/include/binder",
+        "frameworks/av/media",
+    ],
+    cflags: [
+        "-DRTP_TRACE_ENABLE",
+        "-DRTP_DEBUG_ENABLE",
+        "-Wall",
+    ],
+    sanitize: {
+        address: true,
+        undefined: true,
+        cfi: true,
+        misc_undefined: [
+            "integer",
+            "bounds",
+            "signed-integer-overflow",
+        ],
+    },
+}
