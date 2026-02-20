@@ -7,18 +7,16 @@
       "name": "ComposHostTestCases"
     },
     {
+      "name": "libclient_vm_csr.test"
+    },
+    {
       "name": "libdiced_sample_inputs.integration_test"
     },
     {
       "name": "libdiced_sample_inputs_nostd.integration_test"
     }
   ],
-  "postsubmit": [
-    {
-      "name": "libclient_vm_csr.test"
-    }
-  ],
-  "avf-postsubmit": [
+  "avf-presubmit": [
     {
       "name": "VtsHalRemotelyProvisionedComponentTargetTest"
     }
