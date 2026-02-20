@@ -130,7 +130,7 @@ mod tests {
     use crate::cbor::serialize;
     use crate::dice::{ConfigDesc, DiceMode, PayloadBuilder};
     use crate::publickey::testkeys::{PrivateKey, ED25519_KEY_PEM, P256_KEY_PEM, P384_KEY_PEM};
-    use crate::session::Options;
+    use crate::session::{DiceProfileRange, Options};
     use ciborium::cbor;
     use coset::iana::{self, EnumI64};
     use coset::AsCborValue;
@@ -241,6 +241,24 @@ mod tests {
         }));
         let session = Session { options: Options::default() };
         Chain::from_cbor(&session, &serialize(Value::Array(chain))).unwrap();
+    }
+
+    #[test]
+    fn check_from_cbor_valid_aaos_sdv_v1() {
+        let chain = fs::read("testdata/dice/valid_aaos_sdv_v1.chain").unwrap();
+
+        let session = Session {
+            options: Options {
+                dice_profile_range: DiceProfileRange::new(
+                    ProfileVersion::Android15,
+                    ProfileVersion::Android16,
+                ),
+                allow_any_mode: true,
+                ..Default::default()
+            },
+        };
+
+        Chain::from_cbor(&session, &chain).unwrap();
     }
 
     #[test]
