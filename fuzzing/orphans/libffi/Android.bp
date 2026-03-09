@@ -4,6 +4,9 @@ package {
 
 cc_fuzz {
     name: "libffi_fuzz",
+    defaults: [
+        "no_bti",
+    ],
     host_supported: true,
     srcs: [
         "fuzz_ffi.cc",
@@ -19,4 +22,11 @@ cc_fuzz {
     static_libs: [
         "libffi",
     ],
+    fuzz_config: {
+        description: "The fuzzer targets the APIs of libffi",
+        vector: "local_no_privileges_required",
+        service_privilege: "privileged",
+        users: "multi_user",
+        fuzzed_code_usage: "shipped",
+    },
 }
