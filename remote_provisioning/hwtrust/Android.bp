@@ -14,6 +14,7 @@ rust_defaults {
         "libciborium",
         "libclap",
         "libcoset",
+        "libforeign_types",
         "libhex",
         "libitertools",
         "libserde_json",
@@ -21,14 +22,20 @@ rust_defaults {
     ],
     target: {
         host: {
-            rlibs: ["libopenssl_static"],
+            rlibs: [
+                "libopenssl_static",
+                "libbssl_sys_static",
+            ],
             // dylib is disabled due to compile failure in libhwtrust. See b/373621186 for details.
             dylib: {
                 enabled: false,
             },
         },
         android: {
-            rustlibs: ["libopenssl"],
+            rustlibs: [
+                "libopenssl",
+                "libbssl_sys",
+            ],
         },
     },
 }

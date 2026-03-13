@@ -5,12 +5,23 @@ use anyhow::{anyhow, bail, ensure, Context, Result};
 use coset::cbor::value::Value;
 use coset::iana::{self, EnumI64};
 use coset::{Algorithm, CoseKey, CoseKeyBuilder, CoseSign1, KeyOperation, KeyType, Label};
+use foreign_types::ForeignType;
 use openssl::bn::{BigNum, BigNumContext};
 use openssl::ec::{EcGroup, EcKey};
 use openssl::ecdsa::EcdsaSig;
+use openssl::error::ErrorStack;
 use openssl::nid::Nid;
 use openssl::pkey::{Id, PKey, Public};
 use std::collections::HashSet;
+
+#[inline]
+fn cvt_p<T>(r: *mut T) -> Result<*mut T, ErrorStack> {
+    if r.is_null() {
+        Err(ErrorStack::get())
+    } else {
+        Ok(r)
+    }
+}
 
 impl PublicKey {
     /// Create a public key from a [`CoseKey`].
@@ -94,6 +105,7 @@ fn to_pkey(cose_key: &CoseKey) -> Result<PKey<Public>> {
     match cose_key.kty {
         KeyType::Assigned(iana::KeyType::OKP) => Ok(pkey_from_okp_key(cose_key)?),
         KeyType::Assigned(iana::KeyType::EC2) => Ok(pkey_from_ec2_key(cose_key)?),
+        KeyType::Assigned(iana::KeyType::AKP) => Ok(pkey_from_akp_key(cose_key)?),
         _ => bail!("Unexpected KeyType value: {:?}", cose_key.kty),
     }
 }
@@ -112,6 +124,51 @@ fn adjust_coord(mut coordinate: Vec<u8>, length: usize) -> Result<Vec<u8>> {
     }
 
     Ok(coordinate)
+}
+
+fn pkey_from_akp_key(cose_key: &CoseKey) -> Result<PKey<Public>> {
+    ensure!(cose_key.kty == KeyType::Assigned(iana::KeyType::AKP));
+    ensure_no_disallowed_labels(cose_key)?;
+    ensure!(
+        cose_key.alg == Some(Algorithm::Assigned(iana::Algorithm::ML_DSA_65))
+            || cose_key.alg == Some(Algorithm::Assigned(iana::Algorithm::ML_DSA_87))
+    );
+
+    let pub_key =
+        get_label_value_as_bytes(cose_key, Label::Int(iana::AkpKeyParameter::Pub.to_i64()))?;
+    if cose_key.alg == Some(Algorithm::Assigned(iana::Algorithm::ML_DSA_65)) {
+        ensure!(pub_key.len() == 1952, "Invalid public key length for ML-DSA-65");
+    } else {
+        ensure!(pub_key.len() == 2592, "Invalid public key length for ML-DSA-87");
+    }
+    let pkey_alg = match cose_key.alg {
+        // SAFETY: EVP_pkey_ml_dsa_65() is always safe to call.
+        Some(Algorithm::Assigned(iana::Algorithm::ML_DSA_65)) => unsafe {
+            bssl_sys::EVP_pkey_ml_dsa_65()
+        },
+        // SAFETY: EVP_pkey_ml_dsa_87() is always safe to call.
+        Some(Algorithm::Assigned(iana::Algorithm::ML_DSA_87)) => unsafe {
+            bssl_sys::EVP_pkey_ml_dsa_87()
+        },
+        _ => unreachable!("Ensured that the key uses one of the ML-DSA algorithms above."),
+    };
+
+    // SAFETY:
+    //   * Since pub_key is &[u8], its valid to read up to pub_key.len() bytes from
+    //     pub_key.as_ptr().
+    //   * pkey_alg is a valid EVP_PKEY_ALG because we got it from one of the bssl functions above.
+    //   * The length of pub_key matches the algorithm from pkey_alg.
+    //   * If there is an error, then EVP_PKEY_from_raw_public_key will return a null pointer which
+    //     is handled by cvt_p().
+    let evp_pkey = unsafe {
+        bssl_sys::EVP_PKEY_from_raw_public_key(pkey_alg, pub_key.as_ptr(), pub_key.len())
+    };
+    let pkey = cvt_p(evp_pkey).map(|p| {
+        // SAFETY: EVP_PKEY_from_raw_public_key() returns a valid EVP_PKEY if the pointer is
+        // not null.
+        unsafe { PKey::from_ptr(p) }
+    })?;
+    Ok(pkey)
 }
 
 fn pkey_from_okp_key(cose_key: &CoseKey) -> Result<PKey<Public>> {
