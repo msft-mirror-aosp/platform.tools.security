@@ -119,6 +119,7 @@ impl fmt::Debug for Payload {
         debug.field("Issuer", &self.issuer);
         debug.field("Subject", &self.subject);
         debug.field("Mode", &self.mode);
+        debug.field("Subject Public Key Type", &self.subject_public_key.kind());
         if let Some(code_desc) = &self.code_desc {
             debug.field("Code Desc", &hex::encode(code_desc));
         }
