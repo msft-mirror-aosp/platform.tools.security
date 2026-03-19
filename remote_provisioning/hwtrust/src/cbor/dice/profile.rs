@@ -2,6 +2,7 @@
 
 use super::KeyOpsType;
 use crate::dice::ProfileVersion;
+use coset::iana::{self, EnumI64};
 
 /// Options that describe an Android Profile for DICE.
 #[derive(Default)]
@@ -40,6 +41,9 @@ pub(super) struct Profile {
 
     /// Whether the root certificate's authority hash size is allowed to differ from its code hash size.
     pub(super) allow_root_varied_auth_hash_size: bool,
+
+    /// Set of algorithms that are allowed in the DICE chain.
+    pub(super) allowed_algorithms: Option<Vec<i64>>,
 }
 
 /// Type allowed for the DICE certificate mode field.
@@ -73,6 +77,11 @@ impl Profile {
             component_version_type: ComponentVersionType::Int,
             config_hash_unverified: true,
             security_version_optional: true,
+            allowed_algorithms: Some(vec![
+                iana::Algorithm::EdDSA.to_i64(),
+                iana::Algorithm::ES256.to_i64(),
+                iana::Algorithm::ES384.to_i64(),
+            ]),
             ..Self::default()
         }
     }
@@ -87,18 +96,55 @@ impl Profile {
             security_version_optional: true,
             allow_root_mode_debug: true,
             allow_root_varied_auth_hash_size: true,
+            allowed_algorithms: Some(vec![
+                iana::Algorithm::EdDSA.to_i64(),
+                iana::Algorithm::ES256.to_i64(),
+                iana::Algorithm::ES384.to_i64(),
+            ]),
             ..Self::default()
         }
     }
 
     /// The rules for the "android.15" profile.
     pub(super) fn android15() -> Self {
-        Self { config_hash_unverified: true, security_version_optional: true, ..Self::default() }
+        Self {
+            config_hash_unverified: true,
+            allowed_algorithms: Some(vec![
+                iana::Algorithm::EdDSA.to_i64(),
+                iana::Algorithm::ES256.to_i64(),
+                iana::Algorithm::ES384.to_i64(),
+            ]),
+            security_version_optional: true,
+            ..Self::default()
+        }
     }
 
     /// The rules for the "android.16" profile..
     pub(super) fn android16() -> Self {
-        Self { config_hash_unverified: true, ..Self::default() }
+        Self {
+            config_hash_unverified: true,
+            allowed_algorithms: Some(vec![
+                iana::Algorithm::EdDSA.to_i64(),
+                iana::Algorithm::ES256.to_i64(),
+                iana::Algorithm::ES384.to_i64(),
+            ]),
+            ..Self::default()
+        }
+    }
+
+    /// The rules for the "android.18" profile.
+    pub(super) fn android18() -> Self {
+        Self {
+            config_hash_unverified: true,
+            allowed_algorithms: Some(vec![
+                iana::Algorithm::EdDSA.to_i64(),
+                iana::Algorithm::ES256.to_i64(),
+                iana::Algorithm::ES384.to_i64(),
+                iana::Algorithm::ML_DSA_65.to_i64(),
+                iana::Algorithm::ML_DSA_87.to_i64(),
+            ]),
+            ..Self::default()
+        }
     }
 }
 
@@ -109,6 +155,7 @@ impl From<ProfileVersion> for Profile {
             ProfileVersion::Android14 => Profile::android14(),
             ProfileVersion::Android15 => Profile::android15(),
             ProfileVersion::Android16 => Profile::android16(),
+            ProfileVersion::Android18 => Profile::android18(),
         }
     }
 }

@@ -118,7 +118,7 @@ fn root_and_entries_from_value(
     } else {
         KeyOpsType::default()
     };
-    let root_public_key = cose_key_from_cbor_value(it.next().unwrap(), key_ops_type)
+    let root_public_key = cose_key_from_cbor_value(it.next().unwrap(), key_ops_type, None)
         .context("Error parsing root public key CBOR")?;
     let root_public_key = PublicKey::from_cose_key(&root_public_key).context("Invalid root key")?;
     Ok((root_public_key, it))
