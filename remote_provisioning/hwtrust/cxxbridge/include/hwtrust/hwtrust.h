@@ -45,7 +45,7 @@ public:
 
   bool IsProper() const noexcept;
 
-  Result<int> countTrailingRkpVmMarkers() const noexcept;
+  Result<int> countTrailingRkpVmMarkers(std::string_view instance) const noexcept;
 
 private:
   DiceChain(std::unique_ptr<BoxedDiceChain> chain, size_t size) noexcept;

@@ -160,8 +160,8 @@ Result<bool> Csr::compareChallenge(const std::vector<uint8_t>& challenge) const 
     return result.value;
 }
 
-Result<int> DiceChain::countTrailingRkpVmMarkers() const noexcept {
-    auto result = rust::countTrailingRkpVmMarkers(**chain_);
+Result<int> DiceChain::countTrailingRkpVmMarkers(std::string_view instance) const noexcept {
+    auto result = rust::countTrailingRkpVmMarkers(**chain_, std::string(instance));
     if (!result.error.empty()) {
         return Error() << static_cast<std::string>(result.error);
     }
