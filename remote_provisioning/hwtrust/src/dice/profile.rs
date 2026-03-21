@@ -14,6 +14,8 @@ pub enum ProfileVersion {
     Android15,
     /// The version of the Android Profile for DICE that aligns with Android 16.
     Android16,
+    /// The version of the Android Profile for DICE that aligns with Android 18.
+    Android18,
 }
 
 impl Display for ProfileVersion {
@@ -23,6 +25,7 @@ impl Display for ProfileVersion {
             Self::Android14 => "android.14",
             Self::Android15 => "android.15",
             Self::Android16 => "android.16",
+            Self::Android18 => "android.18",
         };
         write!(f, "{profile_name}",)
     }
@@ -49,6 +52,7 @@ impl FromStr for ProfileVersion {
             "android.15" => Self::Android15,
             // Allow Widevine profile version 19 and 20, which has the same rules as Android 16.
             "android.16" | "widevine.19" | "widevine.20" => Self::Android16,
+            "android.18" => Self::Android18,
             _ => return Err(ParseProfileVersionError(())),
         })
     }

@@ -107,7 +107,7 @@ impl DiceProfileRange {
 
 impl Default for DiceProfileRange {
     fn default() -> Self {
-        Self::new(ProfileVersion::Android14, ProfileVersion::Android16)
+        Self::new(ProfileVersion::Android14, ProfileVersion::Android18)
     }
 }
 
@@ -212,5 +212,17 @@ impl Options {
     /// The options used by VSR 17.
     pub fn vsr17() -> Self {
         Self::vsr16()
+    }
+
+    /// The options used by VSR 18.
+    pub fn vsr18() -> Self {
+        Self {
+            dice_profile_range: DiceProfileRange::new(
+                ProfileVersion::Android14,
+                ProfileVersion::Android18,
+            ),
+            device_info_range: DeviceInfoRange::single(DeviceInfoVersion::V3),
+            ..Default::default()
+        }
     }
 }

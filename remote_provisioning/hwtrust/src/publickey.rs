@@ -15,6 +15,10 @@ pub enum SignatureKind {
     Ed25519,
     /// Elliptic Curve Digital Signature Algorithm (ECDSA).
     Ec(EcKind),
+    /// Module-Lattice-Based Digital Signature Algorithm ML-DSA-65.
+    MlDsa65,
+    /// Module-Lattice-Based Digital Signature Algorithm ML-DSA-87.
+    MlDsa87,
 }
 
 /// The kinds of key agreement keys that are supported.
@@ -67,7 +71,9 @@ impl PublicKey {
     /// with the PublicKey matches the signature provided.
     pub fn verify(&self, signature: &[u8], message: &[u8]) -> Result<()> {
         let mut verifier = match self.kind {
-            SignatureKind::Ed25519 => Verifier::new_without_digest(&self.pkey.0),
+            SignatureKind::Ed25519 | SignatureKind::MlDsa65 | SignatureKind::MlDsa87 => {
+                Verifier::new_without_digest(&self.pkey.0)
+            }
             SignatureKind::Ec(ec) => Verifier::new(digest_for_ec(ec), &self.pkey.0),
         }
         .with_context(|| format!("Failed to create verifier {:?}", self.kind))?;
@@ -86,6 +92,8 @@ impl PublicKey {
         match pkey.id() {
             Id::ED25519 => Some(SignatureKind::Ed25519),
             Id::EC => pkey_ec_kind(pkey).map(SignatureKind::Ec),
+            id if id.as_raw() == bssl_sys::NID_ML_DSA_65 => Some(SignatureKind::MlDsa65),
+            id if id.as_raw() == bssl_sys::NID_ML_DSA_87 => Some(SignatureKind::MlDsa87),
             _ => None,
         }
     }
@@ -313,7 +321,9 @@ pub(crate) mod testkeys {
 
         pub fn sign(&self, message: &[u8]) -> Result<Vec<u8>> {
             let mut signer = match self.kind {
-                SignatureKind::Ed25519 => Signer::new_without_digest(&self.pkey)?,
+                SignatureKind::Ed25519 | SignatureKind::MlDsa65 | SignatureKind::MlDsa87 => {
+                    Signer::new_without_digest(&self.pkey)?
+                }
                 SignatureKind::Ec(ec) => Signer::new(digest_for_ec(ec), &self.pkey)?,
             };
             signer.sign_oneshot_to_vec(message).context("signing message")
