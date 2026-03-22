@@ -299,8 +299,12 @@ fn validate_subject_public_key(
 ) -> Result<PublicKey> {
     let subject_public_key = subject_public_key.into_bytes()?;
     let subject_public_key = value_from_bytes(&subject_public_key).context("decode CBOR")?;
-    let subject_public_key = cose_key_from_cbor_value(subject_public_key, profile.key_ops_type)
-        .context("parsing subject public key")?;
+    let subject_public_key = cose_key_from_cbor_value(
+        subject_public_key,
+        profile.key_ops_type,
+        profile.allowed_algorithms.as_deref(),
+    )
+    .context("parsing subject public key")?;
     PublicKey::from_cose_key(&subject_public_key)
         .context("parsing subject public key from COSE_key")
 }
